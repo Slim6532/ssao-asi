@@ -176,11 +176,22 @@ executeDual(RxPipeline *pipe, RpAtomic *atomic)
 	return pipe;
 }
 
+static void installColourFilterHook(void);
+
 // ---------- atomic level (default objects, peds, vehicles) ----------
 // Replaces the game's AtomicDefaultRenderCallBack
 static RpAtomic*
 myDefaultCallback(RpAtomic *atomic)
 {
+	// First rendered frame = every ASI has finished loading. Hook the colour filter NOW (not in
+	// DllMain) so we chain to whatever other mods (colour mods, ENB-style filters) already put there
+	// instead of overwriting it.
+	static bool filterHookDone;
+	if(!filterHookDone){
+		filterHookDone = true;
+		installColourFilterHook();
+	}
+
 	RxPipeline *pipe;
 	int zwrite = 0;
 	int dodual = 0;
@@ -288,13 +299,15 @@ DP_UpdateFrontBuffer(void)
 }
 
 typedef void (__cdecl *DPColourFilterFn)(unsigned c1, unsigned c2);
+// whatever the colour filter call site pointed at before us (the game's own filter, or another mod's hook)
+static DPColourFilterFn oColourFilter = (DPColourFilterFn)0x703650;
 
 static void __cdecl
 myColourFilter(unsigned c1, unsigned c2)
 {
 	RwCamera *cam = *(RwCamera**)0xC1703C;
 
-	((DPColourFilterFn)0x703650)(c1, c2);        // the game's own filter, unchanged
+	oColourFilter(c1, c2);                       // previous filter (game's own + any colour mod), unchanged
 
 	// AO goes AFTER the colour filter: the filter blends a warm tint over the whole frame, so AO
 	// applied before it gets tinted too (dark yellow/brown patches). After it, the AO stays neutral.
@@ -363,6 +376,16 @@ fixSeed(void)
 	}
 }
 
+static void
+installColourFilterHook(void)
+{
+	if(!(cfg.blurEdges || cfg.ssao)) return;
+	uint32_t prev = PTRFROMCALL(0x704D1E);        // current target of the call site (rel32 call/jmp)
+	if(prev == (uint32_t)myColourFilter) return;  // already hooked
+	oColourFilter = (DPColourFilterFn)prev;
+	InjectHook(0x704D1E, myColourFilter);
+}
+
 BOOL WINAPI
 DllMain(HINSTANCE hInst, DWORD reason, LPVOID)
 {
@@ -383,8 +406,8 @@ DllMain(HINSTANCE hInst, DWORD reason, LPVOID)
 			InjectHook(0x74721C, 0x7472F3, PATCH_JUMP);
 		if(cfg.grassFixPlacement)
 			InjectHook(0x5DADB7, fixSeed, PATCH_JUMP);
-		if(cfg.blurEdges || cfg.ssao)
-			InjectHook(0x704D1E, myColourFilter);                     // experimental edge blur
+		// colour filter hook (AO / edge blur) is installed on the first rendered frame, see
+		// installColourFilterHook(), so it chains behind other mods' colour filters
 	}
 	return TRUE;
 }
