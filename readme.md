@@ -27,3 +27,4 @@ Don't run this together with skygfx.dll - they patch the same spots.
 - Turn game antialiasing OFF (the depth buffer is swapped for an INTZ texture, which can't be multisampled).
 - Shaders (`src/ssao.hlsl`) are compiled by `fxc` during the build (GitHub Actions does it for you).
 - If nothing shows up, check `dualpass_ssao.log` in the GTA folder.
+- Press F9 in game (`toggleKey`) to cycle AO on / AO-only view / AO off. The AO-only view helps tell AO artifacts from map textures.

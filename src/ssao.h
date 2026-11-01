@@ -11,6 +11,8 @@ struct SSAOConfig {
 	float fadeDist;      // AO fades out towards this distance
 	int   maxRadiusPx;   // cap on the screen-space radius (keeps texture fetches cache friendly)
 	float minFps;        // adaptive quality: drop quality when FPS stays below this. 0 = off
+	int   toggleKey;     // virtual-key code. Press to cycle: AO on -> AO-only debug view -> AO off. 0 = none
+	int   debugView;     // 1 = start in the AO-only debug view
 };
 
 void SSAO_Apply(float nearZ, float farZ, float viewWinX, float viewWinY, const SSAOConfig *cfg);

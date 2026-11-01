@@ -36,8 +36,10 @@
 static int gLogCount;
 static void LOG(const char *fmt, ...)      // writes dualpass_ssao.log in the GTA folder
 {
-	if(gLogCount++ > 200) return;
-	FILE *f = fopen("dualpass_ssao.log", "a");
+	if(gLogCount++ > 120) return;
+	static bool first = true;                 // fresh log every game start
+	FILE *f = fopen("dualpass_ssao.log", first ? "w" : "a");
+	first = false;
 	if(!f) return;
 	va_list a; va_start(a, fmt); vfprintf(f, fmt, a); va_end(a);
 	fputc('\n', f); fclose(f);
@@ -95,7 +97,7 @@ static HRESULT WINAPI hkSetDSS(IDirect3DDevice9 *dev, IDirect3DSurface9 *s)
 		if(SUCCEEDED(s->GetDesc(&d)) &&
 		   (d.Usage & D3DUSAGE_DEPTHSTENCIL) &&
 		   d.MultiSampleType == D3DMULTISAMPLE_NONE &&
-		   (d.Format == D3DFMT_D24S8 || d.Format == D3DFMT_D24X8) &&
+		   (d.Format == D3DFMT_D24S8 || d.Format == D3DFMT_D24X8 || d.Format == DP_INTZ) &&
 		   d.Width == gW && d.Height == gH){
 			if(!gDepthTex){
 				HRESULT hr = dev->CreateTexture(gW, gH, 1, D3DUSAGE_DEPTHSTENCIL, DP_INTZ,
@@ -109,7 +111,7 @@ static HRESULT WINAPI hkSetDSS(IDirect3DDevice9 *dev, IDirect3DSurface9 *s)
 			if(gDepthSurf) s = gDepthSurf;
 		}else{
 			static int n;
-			if(n++ < 6) LOG("SetDSS ignored: msaa=%d fmt=%d size=%ux%u (backbuffer %ux%u)",
+			if(n++ < 3) LOG("SetDSS ignored: msaa=%d fmt=%d size=%ux%u (backbuffer %ux%u)",
 			                (int)d.MultiSampleType, (int)d.Format, d.Width, d.Height, gW, gH);
 		}
 	}
@@ -179,6 +181,26 @@ static void setTarget(IDirect3DDevice9 *dev, IDirect3DSurface9 *rt, UINT w, UINT
 	dev->SetVertexShaderConstantF(8, v, 1);
 }
 
+// ---------- toggle key: AO on -> AO-only debug view -> AO off ----------
+static int  gMode = -1;                     // 0 = on, 1 = AO-only view, 2 = off
+static bool gKeyWasDown;
+
+static void updateMode(const SSAOConfig *c)
+{
+	if(gMode < 0) gMode = c->debugView ? 1 : 0;
+	if(!c->toggleKey) return;
+	bool down = (GetAsyncKeyState(c->toggleKey) & 0x8000) != 0;
+	if(down && !gKeyWasDown){
+		DWORD pid = 0;
+		GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+		if(pid == GetCurrentProcessId()){   // ignore the key when GTA isn't the active window
+			gMode = (gMode + 1) % 3;
+			LOG("mode -> %d (0 = AO on, 1 = AO only, 2 = off)", gMode);
+		}
+	}
+	gKeyWasDown = down;
+}
+
 // ---------- adaptive quality (FPS floor) ----------
 static LARGE_INTEGER gFreq, gLast;
 static float gEma;                          // smoothed frame time, ms
@@ -225,6 +247,7 @@ static int updateGovernor(const SSAOConfig *c)
 void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig *c)
 {
 	IDirect3DDevice9 *dev = gDev;
+	updateMode(c);
 	int q = updateGovernor(c);
 
 	static int frame;
@@ -249,7 +272,8 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 		}
 		return;
 	}
-	if(q < 0) return;                       // governor switched AO off
+	if(q < 0 || gMode == 2) return;         // governor or toggle key switched AO off
+	if(!gW || !gH) return;                  // minimized / mode change in progress
 	if(!ensureResources(dev)){
 		if(frame % 600 == 0) LOG("ensureResources failed (AO targets or state block)");
 		return;
@@ -318,9 +342,13 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	setTarget(dev, oldRT, gW, gH);
 	dev->SetTexture(1, gTexA);
 	dev->SetPixelShader(gPSComp);
-	dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-	dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ZERO);
-	dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_SRCCOLOR);   // dest = dest * ao
+	if(gMode == 1){
+		dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);        // debug: show the AO alone
+	}else{
+		dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+		dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ZERO);
+		dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_SRCCOLOR);   // dest = dest * ao
+	}
 	drawQuad(dev);
 
 	// ---- restore ----
