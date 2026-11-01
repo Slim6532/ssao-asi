@@ -45,9 +45,25 @@ float3 ViewPos(float2 uv, float z)
 	              z);
 }
 
+// Depth is point sampled, so every position MUST be snapped to a full-res pixel centre before it is
+// paired with a depth value. Otherwise position and depth disagree by up to half a pixel, which on
+// steep (grazing) surfaces looks like real geometry and draws moire / horizontal lines in the AO.
+float2 SnapUV(float2 uv)
+{
+	return (floor(uv / gView.zw) + 0.5) * gView.zw;
+}
+
+// depth at a HALF-res texel centre (lies exactly on a full-res pixel border): always use full-res
+// pixel (2i, 2j), the same one PSAO used for that texel
+float ZHalf(float2 uv)
+{
+	return LinZ(SnapUV(uv - 0.5 * gView.zw));
+}
+
 // ------------------------------------------------------------------------------------
 float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 {
+	uv = SnapUV(uv - 0.5 * gView.zw);                          // full-res pixel (2i,2j), exact centre
 	float d0 = tex2Dlod(sDepth, float4(uv, 0, 0)).r;
 	float zc = gProj.x / (gProj.y - d0 * gProj.z);
 	float rPx = gProj.w / (2.0 * gView.x * zc) / gView.z;      // AO radius in full-res pixels
@@ -94,7 +110,7 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 		{
 			float t = ((j + 0.25 + 0.75 * jit) / NSTEP) * rPx;  // pixels
 			t = max(t, 1.5);
-			float2 suv = uv + dir * t * gView.zw;
+			float2 suv = SnapUV(uv + dir * t * gView.zw);       // snap: position must match the depth texel
 			float3 V   = ViewPos(suv, LinZ(suv)) - P;
 			float  d2  = dot(V, V);
 			float  h   = dot(N, V) * rsqrt(d2 + 1e-6);          // sin(elevation above tangent plane)
@@ -120,14 +136,14 @@ static const float kWt[4]  = { 0.5, 1.0, 1.0, 0.5 };
 
 float4 PSBlur(float2 uv : TEXCOORD0) : COLOR
 {
-	float zc  = LinZ(uv);
+	float zc  = ZHalf(uv);
 	float sum = tex2Dlod(sAO, float4(uv, 0, 0)).r * 1.0;
 	float wsum = 1.0;
 	float tol = zc * 0.04 + 0.05;
 	[unroll] for (int i = 0; i < 4; i++)
 	{
 		float2 suv = uv + gDir.xy * kOff[i];
-		float  zs  = LinZ(suv);
+		float  zs  = ZHalf(suv);
 		float  w   = kWt[i] * saturate(1.0 - abs(zs - zc) / tol);
 		sum  += tex2Dlod(sAO, float4(suv, 0, 0)).r * w;
 		wsum += w;
@@ -150,7 +166,7 @@ float4 PSComp(float2 uv : TEXCOORD0) : COLOR
 	[unroll] for (int x = 0; x < 2; x++)
 	{
 		float2 suv = uv00 + float2(x, y) * gCfg2.yz;
-		float  zs  = LinZ(suv);
+		float  zs  = ZHalf(suv);
 		float  wb  = (x ? f.x : 1.0 - f.x) * (y ? f.y : 1.0 - f.y);
 		float  w   = wb * saturate(1.0 - abs(zs - zc) / tol) + 1e-4;
 		sum  += tex2Dlod(sAO, float4(suv, 0, 0)).r * w;
