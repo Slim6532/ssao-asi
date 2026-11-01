@@ -20,8 +20,10 @@ Don't run this together with skygfx.dll - they patch the same spots.
 ## Extras
 `[Extras]` in dualpass.ini: disableClouds, disableGamma, blur edges, game radiosity, grass backface cull / placement fix.
 
-## Ambient occlusion (native SSAO)
-`[AO]` in dualpass.ini: ssao, radius, intensity, fadeDistance. No ReShade needed.
+## Ambient occlusion (native, HBAO-style)
+`[AO]` in dualpass.ini. No ReShade needed.
+- Horizon-based AO at half resolution, separable depth-aware blur, depth-aware upsample.
+- `quality` 0/1/2 picks the sample count. `minFps` is an FPS stabilizer: quality drops automatically when FPS stays below it, and recovers when there is headroom.
 - Turn game antialiasing OFF (the depth buffer is swapped for an INTZ texture, which can't be multisampled).
-- Shaders (`src/ssao.hlsl`) are compiled by `fxc` during the build (GitHub Actions does this for you).
+- Shaders (`src/ssao.hlsl`) are compiled by `fxc` during the build (GitHub Actions does it for you).
 - If nothing shows up, check `dualpass_ssao.log` in the GTA folder.
