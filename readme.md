@@ -30,3 +30,8 @@ Don't run this together with skygfx.dll - they patch the same spots.
 - Shaders (`src/ssao.hlsl`) are compiled by `fxc` during the build (GitHub Actions does it for you).
 - If nothing shows up, check `dualpass_ssao.log` in the GTA folder.
 - Press F9 in game (`toggleKey`) to cycle AO on / AO-only view / AO off. The AO-only view helps tell AO artifacts from map textures.
+
+## FXAA + sharpening
+`[Post]` in dualpass.ini. One extra full-screen pass (a StretchRect copy of the frame + one draw), applied after the colour filter and the AO and before the HUD.
+- FXAA only does extra work on edge pixels; sharpening is CAS-style (adaptive, avoids halos). Both are in the same shader (`src/post.hlsl`).
+- Press F10 (`toggleKey`) in game to switch it on/off and compare.

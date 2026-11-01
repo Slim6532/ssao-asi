@@ -24,6 +24,7 @@
 #include <string.h>
 #include "MemoryMgr.h"
 #include "ssao.h"
+#include "post.h"
 
 // ---------- things the plugin-sdk RenderWare headers don't provide ----------
 // alpha test render states / functions (RW 3.6 numbering)
@@ -74,6 +75,7 @@ static struct {
 	int grassBackfaceCull, grassFixPlacement;
 	// native SSAO
 	int ssao; SSAOConfig ssaoCfg;
+	PostConfig postCfg;                          // FXAA + sharpening
 } cfg;
 static int gFixGrassPlacement;
 
@@ -132,6 +134,15 @@ readConfig(HINSTANCE hInst)
 	cfg.ssaoCfg.minFps      = (float)readInt("AO", "minFps", 45, path);
 	cfg.ssaoCfg.toggleKey   = readInt("AO", "toggleKey", 120, path);   // 120 = F9
 	cfg.ssaoCfg.debugView   = readInt("AO", "debugView", 0, path);
+	cfg.postCfg.fxaa        = readInt("Post", "fxaa", 0, path);
+	cfg.postCfg.edgeThresh  = readInt("Post", "fxaaThreshold", 125, path) / 1000.0f;   // 125 = 0.125
+	cfg.postCfg.sharpen     = readInt("Post", "sharpen", 0, path);
+	cfg.postCfg.sharpAmount = readInt("Post", "sharpenAmount", 30, path) / 100.0f;
+	cfg.postCfg.toggleKey   = readInt("Post", "toggleKey", 121, path);                 // 121 = F10
+	if(cfg.postCfg.edgeThresh < 0.03f) cfg.postCfg.edgeThresh = 0.03f;
+	if(cfg.postCfg.edgeThresh > 0.5f)  cfg.postCfg.edgeThresh = 0.5f;
+	if(cfg.postCfg.sharpAmount < 0.0f) cfg.postCfg.sharpAmount = 0.0f;
+	if(cfg.postCfg.sharpAmount > 1.0f) cfg.postCfg.sharpAmount = 1.0f;
 	cfg.ssaoCfg.interval    = readInt("AO", "updateInterval", 0, path);
 	if(cfg.ssaoCfg.interval < 0) cfg.ssaoCfg.interval = 0;
 	if(cfg.ssaoCfg.interval > 4) cfg.ssaoCfg.interval = 4;
@@ -313,6 +324,10 @@ myColourFilter(unsigned c1, unsigned c2)
 	// applied before it gets tinted too (dark yellow/brown patches). After it, the AO stays neutral.
 	if(cfg.ssao)
 		SSAO_Apply(cam->nearPlane, cam->farPlane, cam->viewWindow.x, cam->viewWindow.y, &cfg.ssaoCfg);
+
+	// FXAA + sharpening last: it sees the final colour (colour mod + AO) and runs before the HUD
+	if(cfg.postCfg.fxaa || cfg.postCfg.sharpen)
+		Post_Apply(&cfg.postCfg);
 	if(!cfg.blurEdges) return;
 
 	RwRaster *fb = *(RwRaster**)0xC402D8;
@@ -379,7 +394,7 @@ fixSeed(void)
 static void
 installColourFilterHook(void)
 {
-	if(!(cfg.blurEdges || cfg.ssao)) return;
+	if(!(cfg.blurEdges || cfg.ssao || cfg.postCfg.fxaa || cfg.postCfg.sharpen)) return;
 	uint32_t prev = PTRFROMCALL(0x704D1E);        // current target of the call site (rel32 call/jmp)
 	if(prev == (uint32_t)myColourFilter) return;  // already hooked
 	oColourFilter = (DPColourFilterFn)prev;
