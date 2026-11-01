@@ -19,6 +19,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <d3d9.h>
+
+#pragma comment(lib, "user32.lib")   // GetAsyncKeyState / GetForegroundWindow for the hotkey
 #include "MemoryMgr.h"
 #include "ssao.h"
 
