@@ -2,11 +2,12 @@
 //
 //   VSMain  : fullscreen quad
 //   PSAO    : horizon-based AO at HALF resolution (NDIR directions x NSTEP steps, set with /D)
-//   PSBlur  : 7-tap depth-aware blur, run twice (horizontal, vertical) at half resolution
-//   PSComp  : depth-aware 2x2 upsample to full resolution, output is MULTIPLIED onto the backbuffer
+//             writes (ao, linear depth) so the later passes never have to touch the depth buffer again
+//   PSBlur  : 5-tap depth-aware blur (exact 4 px box), run twice (horizontal, vertical), half res
+//   PSComp  : depth-aware 2x2 upsample to full resolution (+ dither), MULTIPLIED onto the backbuffer
 
 sampler2D sDepth : register(s0);   // INTZ depth texture (point)
-sampler2D sAO    : register(s1);   // half-res AO target (linear)
+sampler2D sAO    : register(s1);   // half-res AO target: R = ao, G = linear depth (point)
 
 float4 gProj : register(c0);   // x = near*far, y = far, z = far-near, w = radius (world units)
 float4 gView : register(c1);   // x = viewWindow.x, y = viewWindow.y, z = 1/fullW, w = 1/fullH
@@ -53,24 +54,18 @@ float2 SnapUV(float2 uv)
 	return (floor(uv / gView.zw) + 0.5) * gView.zw;
 }
 
-// depth at a HALF-res texel centre (lies exactly on a full-res pixel border): always use full-res
-// pixel (2i, 2j), the same one PSAO used for that texel
-float ZHalf(float2 uv)
-{
-	return LinZ(SnapUV(uv - 0.5 * gView.zw));
-}
-
 // ------------------------------------------------------------------------------------
 float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 {
 	uv = SnapUV(uv - 0.5 * gView.zw);                          // full-res pixel (2i,2j), exact centre
 	float d0 = tex2Dlod(sDepth, float4(uv, 0, 0)).r;
 	float zc = gProj.x / (gProj.y - d0 * gProj.z);
+	float zs0 = min(zc, 60000.0);                              // what the blur passes see as depth
 	float rPx = gProj.w / (2.0 * gView.x * zc) / gView.z;      // AO radius in full-res pixels
 
 	// cheap early-out: sky, far away, or too small on screen to matter
 	[branch] if (d0 >= 0.9999 || zc > gCfg.w || rPx < 2.0)
-		return float4(1, 1, 1, 1);
+		return float4(1, zs0, 0, 1);
 	rPx = min(rPx, gCfg.z);
 
 	float3 P = ViewPos(uv, zc);
@@ -89,7 +84,7 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 
 	// per-pixel noise: direction rotation + step jitter.
 	// 4x4 interleaved tile in HALF-res pixel coords. PSBlur averages exactly one 4x4 tile, so the
-	// pattern cancels out completely (the old full-res gradient noise left horizontal lines).
+	// pattern cancels out completely.
 	float2 hpix = floor(uv / gCfg2.yz);
 	float2 nb  = fmod(hpix, 4.0);
 	float2 b0  = fmod(nb, 2.0);
@@ -115,7 +110,9 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 			float  d2  = dot(V, V);
 			float  h   = dot(N, V) * rsqrt(d2 + 1e-6);          // sin(elevation above tangent plane)
 			float  w   = saturate(1.0 - d2 / R2);               // HBAO distance falloff
-			float  hn  = max(h, hmax);
+			// samples outside the radius must not raise the horizon (otherwise a far pole or wall
+			// "shadows" the real nearby occluders and leaves halos around foreground objects)
+			float  hn  = max(hmax, (d2 < R2) ? h : -1.0);
 			aoDir += (hn - hmax) * w;                           // only count NEW horizon height
 			hmax = hn;
 		}
@@ -124,9 +121,10 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 	ao /= NDIR;
 
 	float fade = saturate((gCfg.w - zc) / (gCfg.w * 0.35));
+	fade = fade * fade * (3.0 - 2.0 * fade);                    // smoothstep: no visible edge of the AO range
 	float occ  = saturate(ao * gCfg.x * fade);
 	float v    = pow(1.0 - occ, gCfg2.x);
-	return float4(v, v, v, 1);
+	return float4(v, zs0, 0, 1);
 }
 
 // ------------------------------------------------------------------------------------
@@ -136,20 +134,19 @@ static const float kWt[4]  = { 0.5, 1.0, 1.0, 0.5 };
 
 float4 PSBlur(float2 uv : TEXCOORD0) : COLOR
 {
-	float zc  = ZHalf(uv);
-	float sum = tex2Dlod(sAO, float4(uv, 0, 0)).r * 1.0;
+	float2 c   = tex2Dlod(sAO, float4(uv, 0, 0)).rg;           // (ao, depth)
+	float zc   = c.y;
+	float sum  = c.x;
 	float wsum = 1.0;
-	float tol = zc * 0.04 + 0.05;
+	float tol  = zc * 0.04 + 0.05;
 	[unroll] for (int i = 0; i < 4; i++)
 	{
-		float2 suv = uv + gDir.xy * kOff[i];
-		float  zs  = ZHalf(suv);
-		float  w   = kWt[i] * saturate(1.0 - abs(zs - zc) / tol);
-		sum  += tex2Dlod(sAO, float4(suv, 0, 0)).r * w;
+		float2 s = tex2Dlod(sAO, float4(uv + gDir.xy * kOff[i], 0, 0)).rg;
+		float  w = kWt[i] * saturate(1.0 - abs(s.y - zc) / tol);
+		sum  += s.x * w;
 		wsum += w;
 	}
-	float v = sum / wsum;
-	return float4(v, v, v, 1);
+	return float4(sum / wsum, zc, 0, 1);
 }
 
 // ------------------------------------------------------------------------------------
@@ -165,13 +162,15 @@ float4 PSComp(float2 uv : TEXCOORD0) : COLOR
 	[unroll] for (int y = 0; y < 2; y++)
 	[unroll] for (int x = 0; x < 2; x++)
 	{
-		float2 suv = uv00 + float2(x, y) * gCfg2.yz;
-		float  zs  = ZHalf(suv);
-		float  wb  = (x ? f.x : 1.0 - f.x) * (y ? f.y : 1.0 - f.y);
-		float  w   = wb * saturate(1.0 - abs(zs - zc) / tol) + 1e-4;
-		sum  += tex2Dlod(sAO, float4(suv, 0, 0)).r * w;
+		float2 s  = tex2Dlod(sAO, float4(uv00 + float2(x, y) * gCfg2.yz, 0, 0)).rg;
+		float  wb = (x ? f.x : 1.0 - f.x) * (y ? f.y : 1.0 - f.y);
+		float  w  = wb * saturate(1.0 - abs(s.y - zc) / tol) + 1e-4;
+		sum  += s.x * w;
 		wsum += w;
 	}
 	float v = sum / wsum;
+	// 1/255 dither: smooth AO gradients would otherwise band on an 8-bit backbuffer
+	float n = frac(52.9829189 * frac(dot(uv / gView.zw, float2(0.06711056, 0.00583715))));
+	v = saturate(v + (n - 0.5) * (1.0 / 255.0));
 	return float4(v, v, v, 1);
 }

@@ -66,6 +66,7 @@ static IDirect3DStateBlock9   *gSB;
 static IDirect3DVertexShader9 *gVS;
 static IDirect3DPixelShader9  *gPSAO[3], *gPSBlur, *gPSComp;
 static IDirect3DVertexDeclaration9 *gDecl;
+static D3DFORMAT gAOFmt = D3DFMT_UNKNOWN;   // half-res AO target: R = ao, G = linear depth (float format)
 
 static void dropDefaultPool(void)           // everything that must die before Reset()
 {
@@ -73,6 +74,7 @@ static void dropDefaultPool(void)           // everything that must die before R
 }
 static void dropAll(void)
 {
+	gAOFmt = D3DFMT_UNKNOWN;                // re-probe on a new device
 	dropDefaultPool();
 	REL(gVS); REL(gPSBlur); REL(gPSComp); REL(gDecl);
 	for(int i = 0; i < 3; i++) REL(gPSAO[i]);
@@ -138,6 +140,26 @@ static void installHooks(IDirect3DDevice9 *dev)
 	gHooked = true;
 }
 
+// AO targets carry (ao, depth). Depth needs a float format; try the cheapest first.
+static bool createAOTex(IDirect3DDevice9 *dev, IDirect3DTexture9 **out)
+{
+	static const D3DFORMAT fmts[] = { D3DFMT_G16R16F, D3DFMT_A16B16G16R16F, D3DFMT_A32B32G32R32F };
+	if(gAOFmt != D3DFMT_UNKNOWN)
+		return SUCCEEDED(dev->CreateTexture(gHW, gHH, 1, D3DUSAGE_RENDERTARGET, gAOFmt,
+		                                    D3DPOOL_DEFAULT, out, NULL));
+	for(int i = 0; i < 3; i++){
+		if(SUCCEEDED(dev->CreateTexture(gHW, gHH, 1, D3DUSAGE_RENDERTARGET, fmts[i],
+		                                D3DPOOL_DEFAULT, out, NULL))){
+			gAOFmt = fmts[i];
+			LOG("AO target format %d (%ux%u)", (int)gAOFmt, gHW, gHH);
+			return true;
+		}
+	}
+	LOG("no float render target format available for the AO targets");
+	gFailed = true;
+	return false;
+}
+
 static bool ensureResources(IDirect3DDevice9 *dev)
 {
 	if(!gVS){
@@ -157,11 +179,9 @@ static bool ensureResources(IDirect3DDevice9 *dev)
 			gFailed = true; return false;
 		}
 	}
-	if(!gTexA && FAILED(dev->CreateTexture(gHW, gHH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8,
-	                                       D3DPOOL_DEFAULT, &gTexA, NULL)))
+	if(!gTexA && !createAOTex(dev, &gTexA))
 		return false;
-	if(!gTexB && FAILED(dev->CreateTexture(gHW, gHH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8,
-	                                       D3DPOOL_DEFAULT, &gTexB, NULL)))
+	if(!gTexB && !createAOTex(dev, &gTexB))
 		return false;
 	if(!gSurfA) gTexA->GetSurfaceLevel(0, &gSurfA);
 	if(!gSurfB) gTexB->GetSurfaceLevel(0, &gSurfB);
@@ -312,7 +332,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	dev->SetPixelShaderConstantF(3, cf2, 1);
 
 	for(int s = 0; s < 2; s++){
-		DWORD f = s == 0 ? D3DTEXF_POINT : D3DTEXF_LINEAR;
+		DWORD f = D3DTEXF_POINT;            // every tap is at a texel centre; also needs no fp filtering
 		dev->SetSamplerState(s, D3DSAMP_MINFILTER, f);
 		dev->SetSamplerState(s, D3DSAMP_MAGFILTER, f);
 		dev->SetSamplerState(s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);

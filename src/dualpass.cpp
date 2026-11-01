@@ -123,13 +123,13 @@ readConfig(HINSTANCE hInst)
 	cfg.ssaoCfg.quality     = readInt("AO", "quality", 1, path);
 	if(cfg.ssaoCfg.quality < 0) cfg.ssaoCfg.quality = 0;
 	if(cfg.ssaoCfg.quality > 2) cfg.ssaoCfg.quality = 2;
-	cfg.ssaoCfg.radius      = readInt("AO", "radius", 15, path) / 10.0f;
-	cfg.ssaoCfg.intensity   = readInt("AO", "intensity", 150, path) / 100.0f;
-	cfg.ssaoCfg.power       = readInt("AO", "power", 150, path) / 100.0f;
-	cfg.ssaoCfg.bias        = readInt("AO", "bias", 10, path) / 100.0f;
-	cfg.ssaoCfg.fadeDist    = (float)readInt("AO", "fadeDistance", 90, path);
-	cfg.ssaoCfg.maxRadiusPx = readInt("AO", "maxRadiusPx", 40, path);
-	cfg.ssaoCfg.minFps      = (float)readInt("AO", "minFps", 30, path);
+	cfg.ssaoCfg.radius      = readInt("AO", "radius", 18, path) / 10.0f;
+	cfg.ssaoCfg.intensity   = readInt("AO", "intensity", 110, path) / 100.0f;
+	cfg.ssaoCfg.power       = readInt("AO", "power", 130, path) / 100.0f;
+	cfg.ssaoCfg.bias        = readInt("AO", "bias", 12, path) / 100.0f;
+	cfg.ssaoCfg.fadeDist    = (float)readInt("AO", "fadeDistance", 70, path);
+	cfg.ssaoCfg.maxRadiusPx = readInt("AO", "maxRadiusPx", 32, path);
+	cfg.ssaoCfg.minFps      = (float)readInt("AO", "minFps", 45, path);
 	cfg.ssaoCfg.toggleKey   = readInt("AO", "toggleKey", 120, path);   // 120 = F9
 	cfg.ssaoCfg.debugView   = readInt("AO", "debugView", 0, path);
 	if(cfg.def < 0)     cfg.def = cfg.global;
