@@ -23,6 +23,8 @@ Don't run this together with skygfx.dll - they patch the same spots.
 ## Ambient occlusion (native, HBAO-style)
 `[AO]` in dualpass.ini. No ReShade needed.
 - Horizon-based AO at half resolution, separable depth-aware blur, depth-aware upsample. AO and linear depth travel together in one float target, so the blur/upsample passes never re-read the depth buffer.
+- `quality` 0/1/2 picks the sample count. Distant pixels automatically use half the directions.
+- `updateInterval` (0 = auto): at very high FPS the AO is recomputed every 2nd/3rd frame and reused in between; the composite still runs every frame.
 - `quality` 0/1/2 picks the sample count. `minFps` is an FPS stabilizer: quality drops automatically when FPS stays below it, and recovers when there is headroom.
 - Turn game antialiasing OFF (the depth buffer is swapped for an INTZ texture, which can't be multisampled).
 - Shaders (`src/ssao.hlsl`) are compiled by `fxc` during the build (GitHub Actions does it for you).

@@ -93,11 +93,18 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 	float rot  = (bay + 0.5) / 16.0;
 	float jit  = (fmod(bay * 5.0 + 3.0, 16.0) + 0.5) / 16.0;   // different permutation than rot
 
+	// distance LOD: beyond half the fade distance a pixel only gets about half the directions
+	// (small on screen + already faded, so invisible, but ~25% cheaper overall).
+	// The noise tile / blur still cancel because the count only depends on distance.
+	float nd = (zc > gCfg.w * 0.5) ? max(2.0, floor(NDIR * 0.5 + 0.5)) : (float)NDIR;
+
 	float R2 = gProj.w * gProj.w;
 	float ao = 0;
 	[unroll] for (int i = 0; i < NDIR; i++)
 	{
-		float  a   = (i + rot) * (6.2831853 / NDIR);
+	  [branch] if (i < nd)
+	  {
+		float  a   = (i + rot) * (6.2831853 / nd);
 		float2 dir = float2(cos(a), sin(a));
 		float  hmax = gCfg.y;                                   // horizon starts at the bias angle
 		float  aoDir = 0;
@@ -117,8 +124,9 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 			hmax = hn;
 		}
 		ao += aoDir;
+	  }
 	}
-	ao /= NDIR;
+	ao /= nd;
 
 	float fade = saturate((gCfg.w - zc) / (gCfg.w * 0.35));
 	fade = fade * fade * (3.0 - 2.0 * fade);                    // smoothstep: no visible edge of the AO range

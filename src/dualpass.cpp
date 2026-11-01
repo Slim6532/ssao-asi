@@ -127,11 +127,14 @@ readConfig(HINSTANCE hInst)
 	cfg.ssaoCfg.intensity   = readInt("AO", "intensity", 100, path) / 100.0f;
 	cfg.ssaoCfg.power       = readInt("AO", "power", 120, path) / 100.0f;
 	cfg.ssaoCfg.bias        = readInt("AO", "bias", 12, path) / 100.0f;
-	cfg.ssaoCfg.fadeDist    = (float)readInt("AO", "fadeDistance", 70, path);
-	cfg.ssaoCfg.maxRadiusPx = readInt("AO", "maxRadiusPx", 32, path);
+	cfg.ssaoCfg.fadeDist    = (float)readInt("AO", "fadeDistance", 60, path);
+	cfg.ssaoCfg.maxRadiusPx = readInt("AO", "maxRadiusPx", 28, path);
 	cfg.ssaoCfg.minFps      = (float)readInt("AO", "minFps", 45, path);
 	cfg.ssaoCfg.toggleKey   = readInt("AO", "toggleKey", 120, path);   // 120 = F9
 	cfg.ssaoCfg.debugView   = readInt("AO", "debugView", 0, path);
+	cfg.ssaoCfg.interval    = readInt("AO", "updateInterval", 0, path);
+	if(cfg.ssaoCfg.interval < 0) cfg.ssaoCfg.interval = 0;
+	if(cfg.ssaoCfg.interval > 4) cfg.ssaoCfg.interval = 4;
 	if(cfg.def < 0)     cfg.def = cfg.global;
 	if(cfg.vehicle < 0) cfg.vehicle = cfg.global;
 	if(cfg.ped < 0)     cfg.ped = cfg.global;

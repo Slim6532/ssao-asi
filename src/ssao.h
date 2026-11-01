@@ -13,6 +13,7 @@ struct SSAOConfig {
 	float minFps;        // adaptive quality: drop quality when FPS stays below this. 0 = off
 	int   toggleKey;     // virtual-key code. Press to cycle: AO on -> AO-only debug view -> AO off. 0 = none
 	int   debugView;     // 1 = start in the AO-only debug view
+	int   interval;      // AO is recomputed every N frames (cheap composite every frame). 0 = auto by FPS
 };
 
 void SSAO_Apply(float nearZ, float farZ, float viewWinX, float viewWinY, const SSAOConfig *cfg);

@@ -66,10 +66,13 @@ static IDirect3DStateBlock9   *gSB;
 static IDirect3DVertexShader9 *gVS;
 static IDirect3DPixelShader9  *gPSAO[3], *gPSBlur, *gPSComp;
 static IDirect3DVertexDeclaration9 *gDecl;
+static bool gAOValid;                       // gTexA holds a finished AO result we can reuse
+static int  gSkipCount;                     // frames since the AO was last recomputed
 static D3DFORMAT gAOFmt = D3DFMT_UNKNOWN;   // half-res AO target: R = ao, G = linear depth (float format)
 
 static void dropDefaultPool(void)           // everything that must die before Reset()
 {
+	gAOValid = false;
 	REL(gSB); REL(gSurfA); REL(gSurfB); REL(gTexA); REL(gTexB); REL(gDepthSurf); REL(gDepthTex);
 }
 static void dropAll(void)
@@ -341,6 +344,18 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	}
 	dev->SetTexture(0, gDepthTex);
 
+	// Amortise: at very high FPS the AO (the expensive part) is recomputed only every 2nd / 3rd frame
+	// and the previous result is reused; the depth-aware composite still runs on the NEW depth every
+	// frame, so edges stay clean. Auto mode keeps full rate below ~110 FPS.
+	int interval = c->interval;
+	if(interval <= 0){
+		float fps = gEma > 0.0f ? 1000.0f / gEma : 0.0f;
+		interval = fps > 240.0f ? 3 : (fps > 110.0f ? 2 : 1);
+	}
+	bool compute = !gAOValid || ++gSkipCount >= interval;
+	if(compute){
+		gSkipCount = 0;
+
 	// ---- 1. AO (half res) -> A ----
 	dev->SetTexture(1, NULL);
 	setTarget(dev, gSurfA, gHW, gHH);
@@ -359,6 +374,9 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	setTarget(dev, gSurfA, gHW, gHH);
 	dev->SetPixelShaderConstantF(4, dirV, 1);
 	drawQuad(dev);
+
+		gAOValid = true;
+	}
 
 	// ---- 4. depth-aware upsample, multiply onto the backbuffer (full res) ----
 	setTarget(dev, oldRT, gW, gH);
