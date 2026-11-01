@@ -123,9 +123,9 @@ readConfig(HINSTANCE hInst)
 	cfg.ssaoCfg.quality     = readInt("AO", "quality", 1, path);
 	if(cfg.ssaoCfg.quality < 0) cfg.ssaoCfg.quality = 0;
 	if(cfg.ssaoCfg.quality > 2) cfg.ssaoCfg.quality = 2;
-	cfg.ssaoCfg.radius      = readInt("AO", "radius", 18, path) / 10.0f;
-	cfg.ssaoCfg.intensity   = readInt("AO", "intensity", 110, path) / 100.0f;
-	cfg.ssaoCfg.power       = readInt("AO", "power", 130, path) / 100.0f;
+	cfg.ssaoCfg.radius      = readInt("AO", "radius", 14, path) / 10.0f;
+	cfg.ssaoCfg.intensity   = readInt("AO", "intensity", 100, path) / 100.0f;
+	cfg.ssaoCfg.power       = readInt("AO", "power", 120, path) / 100.0f;
 	cfg.ssaoCfg.bias        = readInt("AO", "bias", 12, path) / 100.0f;
 	cfg.ssaoCfg.fadeDist    = (float)readInt("AO", "fadeDistance", 70, path);
 	cfg.ssaoCfg.maxRadiusPx = readInt("AO", "maxRadiusPx", 32, path);
@@ -290,10 +290,13 @@ static void __cdecl
 myColourFilter(unsigned c1, unsigned c2)
 {
 	RwCamera *cam = *(RwCamera**)0xC1703C;
-	if(cfg.ssao)
-		SSAO_Apply(cam->nearPlane, cam->farPlane, cam->viewWindow.x, cam->viewWindow.y, &cfg.ssaoCfg);
 
 	((DPColourFilterFn)0x703650)(c1, c2);        // the game's own filter, unchanged
+
+	// AO goes AFTER the colour filter: the filter blends a warm tint over the whole frame, so AO
+	// applied before it gets tinted too (dark yellow/brown patches). After it, the AO stays neutral.
+	if(cfg.ssao)
+		SSAO_Apply(cam->nearPlane, cam->farPlane, cam->viewWindow.x, cam->viewWindow.y, &cfg.ssaoCfg);
 	if(!cfg.blurEdges) return;
 
 	RwRaster *fb = *(RwRaster**)0xC402D8;
