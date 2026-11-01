@@ -1,10 +1,16 @@
 #pragma once
-// Native SSAO for GTA SA 1.0 US (D3D9). No ReShade.
-// Call once per frame, after the 3D scene is drawn and before the HUD.
-//   nearZ/farZ      : RwCamera nearPlane / farPlane
-//   viewWinX/Y      : RwCamera viewWindow.x / .y (half extent of the view plane at z = 1)
-//   radius          : AO radius in game units (1 unit ~ 1 metre)
-//   intensity       : 0..2+, 1 = normal
-//   fadeDist        : AO fades out towards this distance (game units)
-void SSAO_Apply(float nearZ, float farZ, float viewWinX, float viewWinY,
-                float radius, float intensity, float fadeDist);
+// Native HBAO-style ambient occlusion for GTA SA 1.0 US (D3D9). No ReShade.
+// Call SSAO_Apply once per frame, after the 3D scene is drawn and before the HUD.
+
+struct SSAOConfig {
+	int   quality;       // 0 = low (3x3 taps), 1 = medium (4x4), 2 = high (6x5)
+	float radius;        // AO radius in game units (1 unit ~ 1 metre)
+	float intensity;     // 1 = normal
+	float power;         // contrast exponent (1 = linear)
+	float bias;          // horizon bias 0..0.5 (hides self-occlusion on curved surfaces)
+	float fadeDist;      // AO fades out towards this distance
+	int   maxRadiusPx;   // cap on the screen-space radius (keeps texture fetches cache friendly)
+	float minFps;        // adaptive quality: drop quality when FPS stays below this. 0 = off
+};
+
+void SSAO_Apply(float nearZ, float farZ, float viewWinX, float viewWinY, const SSAOConfig *cfg);
