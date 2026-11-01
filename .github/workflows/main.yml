@@ -1,0 +1,43 @@
+name: build
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # RenderWare headers come from plugin-sdk (public repo); we only need the header folder
+      - name: Get RenderWare headers
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git psdk
+          RWH=$(find psdk -name rwcore.h | head -n 1)
+          echo "rwcore.h found at: $RWH"
+          if [ -z "$RWH" ]; then echo "rwcore.h not found in plugin-sdk"; exit 1; fi
+          echo "RWINC=$(dirname "$RWH")" >> "$GITHUB_ENV"
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86          # GTA SA is 32-bit
+
+      # fxc.exe ships with the Windows SDK, which is on PATH after msvc-dev-cmd
+      - name: Compile shaders
+        shell: cmd
+        run: |
+          fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsQuad   /Fh src\ssao_vs.h      src\ssao.hlsl || exit /b 1
+          fxc /nologo /O3 /T ps_3_0 /E PSAO   /Vn g_psAO     /Fh src\ssao_ps_ao.h   src\ssao.hlsl || exit /b 1
+          fxc /nologo /O3 /T ps_3_0 /E PSBlur /Vn g_psBlur   /Fh src\ssao_ps_blur.h src\ssao.hlsl || exit /b 1
+
+      - name: Build dualpass.asi
+        shell: cmd
+        run: cl /nologo /LD /O2 /MT /Zc:threadSafeInit- /I src /I "%RWINC%" src\dualpass.cpp src\ssao.cpp /Fe:dualpass.asi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dualpass
+          path: |
+            dualpass.asi
+            dualpass.ini
