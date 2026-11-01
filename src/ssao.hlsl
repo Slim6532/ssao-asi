@@ -71,10 +71,16 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 	float3 N  = normalize(cross(dx, dy) + 1e-8);
 	N = (dot(N, P) > 0) ? -N : N;                               // always face the camera
 
-	// per-pixel noise: direction rotation + step jitter
-	float2 pix = uv / gView.zw;
-	float rot = frac(52.9829189 * frac(dot(pix, float2(0.06711056, 0.00583715))));
-	float jit = frac(dot(pix, float2(0.7548776662, 0.5698402910)));
+	// per-pixel noise: direction rotation + step jitter.
+	// 4x4 interleaved tile in HALF-res pixel coords. PSBlur averages exactly one 4x4 tile, so the
+	// pattern cancels out completely (the old full-res gradient noise left horizontal lines).
+	float2 hpix = floor(uv / gCfg2.yz);
+	float2 nb  = fmod(hpix, 4.0);
+	float2 b0  = fmod(nb, 2.0);
+	float2 b1  = floor(nb * 0.5);
+	float bay  = abs(b0.x - b0.y) * 8.0 + b0.y * 4.0 + abs(b1.x - b1.y) * 2.0 + b1.y;   // 0..15
+	float rot  = (bay + 0.5) / 16.0;
+	float jit  = (fmod(bay * 5.0 + 3.0, 16.0) + 0.5) / 16.0;   // different permutation than rot
 
 	float R2 = gProj.w * gProj.w;
 	float ao = 0;
@@ -108,16 +114,17 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 }
 
 // ------------------------------------------------------------------------------------
-static const float kOff[6] = { -3, -2, -1, 1, 2, 3 };
-static const float kWt[6]  = { 0.09, 0.14, 0.18, 0.18, 0.14, 0.09 };
+// Exact 4-pixel box (weights .5 1 1 1 .5) = one full 4x4 noise tile per H+V pass pair
+static const float kOff[4] = { -2, -1, 1, 2 };
+static const float kWt[4]  = { 0.5, 1.0, 1.0, 0.5 };
 
 float4 PSBlur(float2 uv : TEXCOORD0) : COLOR
 {
 	float zc  = LinZ(uv);
-	float sum = tex2Dlod(sAO, float4(uv, 0, 0)).r * 0.2;
-	float wsum = 0.2;
+	float sum = tex2Dlod(sAO, float4(uv, 0, 0)).r * 1.0;
+	float wsum = 1.0;
 	float tol = zc * 0.04 + 0.05;
-	[unroll] for (int i = 0; i < 6; i++)
+	[unroll] for (int i = 0; i < 4; i++)
 	{
 		float2 suv = uv + gDir.xy * kOff[i];
 		float  zs  = LinZ(suv);
