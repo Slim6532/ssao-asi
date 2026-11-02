@@ -16,7 +16,7 @@
 //   PSComp  : depth-aware upsample, pow(power), dither, MULTIPLIED onto the backbuffer
 
 sampler2D sDepth : register(s0);   // INTZ depth texture (point)
-sampler2D sAO    : register(s1);   // AO target: R = ao, G = linear depth (point)
+sampler2D sAO    : register(s1);   // AO target: R = ao, G = linear depth, BA = view normal xy (point)
 sampler2D sRand  : register(s2);   // 4x4 jitter table: R = rotation fraction r1, G = start jitter r2 (point, wrap)
 
 float4 gProj : register(c0);   // x = near*far, y = far, z = far-near, w = radius (world units)
@@ -62,6 +62,20 @@ float3 ViewPos(float2 uv, float z)
 float2 SnapUV(float2 uv)
 {
 	return (floor(uv / gView.zw) + 0.5) * gView.zw;
+}
+
+// view normal packed as xy (z = -sqrt(1-x^2-y^2), it always faces the camera)
+float3 DecodeN(float2 xy)
+{
+	return float3(xy, -sqrt(saturate(1.0 - dot(xy, xy))));
+}
+
+// How much two surfaces count as the same surface. The blur and the upsample use it next to depth,
+// because the ground beside a leg is at almost the SAME depth as the leg but faces another way:
+// without it the leg's AO leaks into the ground (light fringe) and the foot shadow onto the leg.
+float NormalWeight(float3 A, float3 B)
+{
+	return pow(saturate(dot(A, B)), 16.0) + 0.001;
 }
 
 // ---- NVIDIA ReconstructNormal_Common.hlsl ----
@@ -113,7 +127,7 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 
 	// early-out: sky, beyond the fade distance, or a footprint smaller than the first lattice step (4 px)
 	[branch] if (d0 >= 0.9999 || zc > gCfg.w || rPx < 4.0)
-		return float4(1, zs0, 0, 1);
+		return float4(1, zs0, 0, 0);
 	rPx = min(rPx, gCfg.z);
 
 	float3 P = ViewPos(uv, zc);
@@ -170,7 +184,7 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 	float fade = saturate((gCfg.w - zc) / (gCfg.w * 0.35));
 	fade = fade * fade * (3.0 - 2.0 * fade);                    // smoothstep: no visible edge of the AO range
 	float v = 1.0 - saturate(ao * 2.0) * fade;                  // NVIDIA: saturate(1 - AO*2)
-	return float4(v, zs0, 0, 1);
+	return float4(v, zs0, N.xy);
 }
 
 // ------------------------------------------------------------------------------------
@@ -179,15 +193,16 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 // The spatial weights are the exact 4-texel box (.5 1 1 1 .5): it averages one whole 4x4 noise tile.
 float4 PSBlur(float2 uv : TEXCOORD0) : COLOR
 {
-	float2 c  = tex2Dlod(sAO, float4(uv, 0, 0)).rg;            // (ao, depth)
+	float4 c  = tex2Dlod(sAO, float4(uv, 0, 0));               // (ao, depth, normal xy)
 	float  zc = c.y;
+	float3 Nc = DecodeN(c.zw);
 	float  sharp = gCfg.y;
 
 	float2 d  = gDir.xy;
-	float2 a1 = tex2Dlod(sAO, float4(uv + d, 0, 0)).rg;
-	float2 b1 = tex2Dlod(sAO, float4(uv - d, 0, 0)).rg;
-	float2 a2 = tex2Dlod(sAO, float4(uv + 2.0 * d, 0, 0)).rg;
-	float2 b2 = tex2Dlod(sAO, float4(uv - 2.0 * d, 0, 0)).rg;
+	float4 a1 = tex2Dlod(sAO, float4(uv + d, 0, 0));
+	float4 b1 = tex2Dlod(sAO, float4(uv - d, 0, 0));
+	float4 a2 = tex2Dlod(sAO, float4(uv + 2.0 * d, 0, 0));
+	float4 b2 = tex2Dlod(sAO, float4(uv - 2.0 * d, 0, 0));
 
 	// slope = depth change per texel; take the smoother side (like MinDiff) so a depth edge on one
 	// side does not corrupt the prediction for the other
@@ -200,20 +215,32 @@ float4 PSBlur(float2 uv : TEXCOORD0) : COLOR
 	float eb1 = (b1.y - (zc - slope))       * sharp;
 	float ea2 = (a2.y - (zc + slope * 2.0)) * sharp;
 	float eb2 = (b2.y - (zc - slope * 2.0)) * sharp;
-	float wa1 = exp2(-ea1 * ea1);
-	float wb1 = exp2(-eb1 * eb1);
-	float wa2 = 0.5 * exp2(-ea2 * ea2);
-	float wb2 = 0.5 * exp2(-eb2 * eb2);
+	float wa1 = exp2(-ea1 * ea1)       * NormalWeight(Nc, DecodeN(a1.zw));
+	float wb1 = exp2(-eb1 * eb1)       * NormalWeight(Nc, DecodeN(b1.zw));
+	float wa2 = 0.5 * exp2(-ea2 * ea2) * NormalWeight(Nc, DecodeN(a2.zw));
+	float wb2 = 0.5 * exp2(-eb2 * eb2) * NormalWeight(Nc, DecodeN(b2.zw));
 
 	float sum  = c.x + a1.x * wa1 + b1.x * wb1 + a2.x * wa2 + b2.x * wb2;
 	float wsum = 1.0 + wa1 + wb1 + wa2 + wb2;
-	return float4(sum / wsum, zc, 0, 1);
+	return float4(sum / wsum, zc, c.zw);
 }
 
 // ------------------------------------------------------------------------------------
 float4 PSComp(float2 uv : TEXCOORD0) : COLOR
 {
 	float  zc   = LinZ(uv);
+
+	// this full-res pixel's own normal (same reconstruction as in PSAO)
+	float3 Pc = ViewPos(uv, zc);
+	float2 tx = float2(gView.z, 0);
+	float2 ty = float2(0, gView.w);
+	float3 Pr = ViewPos(uv + tx, LinZ(uv + tx));
+	float3 Pl = ViewPos(uv - tx, LinZ(uv - tx));
+	float3 Pd = ViewPos(uv + ty, LinZ(uv + ty));
+	float3 Pu = ViewPos(uv - ty, LinZ(uv - ty));
+	float3 Nc = normalize(cross(MinDiff(Pc, Pr, Pl), MinDiff(Pc, Pd, Pu)) + 1e-8);
+	Nc = (dot(Nc, Pc) > 0) ? -Nc : Nc;
+
 	float2 hp   = uv / gCfg2.yz - 0.5;                 // position in AO texel space
 	float2 base = floor(hp);
 	float2 f    = hp - base;
@@ -222,11 +249,12 @@ float4 PSComp(float2 uv : TEXCOORD0) : COLOR
 	[unroll] for (int y = 0; y < 2; y++)
 	[unroll] for (int x = 0; x < 2; x++)
 	{
-		float2 s  = tex2Dlod(sAO, float4(uv00 + float2(x, y) * gCfg2.yz, 0, 0)).rg;
+		float4 s  = tex2Dlod(sAO, float4(uv00 + float2(x, y) * gCfg2.yz, 0, 0));
 		float  wb = (x ? f.x : 1.0 - f.x) * (y ? f.y : 1.0 - f.y);
-		// joint-bilateral with a heavy tail: similar depth -> full weight, different depth -> tiny weight,
-		// and if ALL four disagree the nearest-in-depth one wins smoothly (no blocky thin objects)
-		float  w  = wb / (abs(s.y - zc) + zc * 0.01 + 0.01);
+		// joint-bilateral on DEPTH (inverse-square) AND SURFACE NORMAL. If all four taps disagree the
+		// best match still wins smoothly (no blocky thin objects, no light fringe along silhouettes).
+		float  dz = s.y - zc;
+		float  w  = wb * NormalWeight(Nc, DecodeN(s.zw)) / (dz * dz + zc * zc * 0.0004 + 0.0025);
 		sum  += s.x * w;
 		wsum += w;
 	}

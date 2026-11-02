@@ -146,14 +146,14 @@ static void installHooks(IDirect3DDevice9 *dev)
 	gHooked = true;
 }
 
-// AO targets carry (ao, depth). Depth needs a float format; try the cheapest first.
+// AO targets carry (ao, depth, normal xy): 4 float channels; try the cheapest format first.
 static bool createAOTex(IDirect3DDevice9 *dev, IDirect3DTexture9 **out)
 {
-	static const D3DFORMAT fmts[] = { D3DFMT_G16R16F, D3DFMT_A16B16G16R16F, D3DFMT_A32B32G32R32F };
+	static const D3DFORMAT fmts[] = { D3DFMT_A16B16G16R16F, D3DFMT_A32B32G32R32F };   // R = ao, G = depth, BA = normal xy
 	if(gAOFmt != D3DFMT_UNKNOWN)
 		return SUCCEEDED(dev->CreateTexture(gHW, gHH, 1, D3DUSAGE_RENDERTARGET, gAOFmt,
 		                                    D3DPOOL_DEFAULT, out, NULL));
-	for(int i = 0; i < 3; i++){
+	for(int i = 0; i < 2; i++){
 		if(SUCCEEDED(dev->CreateTexture(gHW, gHH, 1, D3DUSAGE_RENDERTARGET, fmts[i],
 		                                D3DPOOL_DEFAULT, out, NULL))){
 			gAOFmt = fmts[i];
