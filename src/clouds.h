@@ -17,4 +17,5 @@ struct CloudsConfig {
 	int   log;             // 1 = write dualpass_clouds.log (raw timecyc dump, useful to verify the offset)
 };
 
-void Clouds_Install(const CloudsConfig *cfg);   // call once from DllMain
+void Clouds_Install(const CloudsConfig *cfg);   // call once from DllMain (just stores the settings)
+void Clouds_Draw(void);                         // call once per frame from the colour-filter hook, before the AO

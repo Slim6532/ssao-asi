@@ -352,6 +352,10 @@ myColourFilter(unsigned c1, unsigned c2)
 
 	oColourFilter(c1, c2);                       // previous filter (game's own + any colour mod), unchanged
 
+	// fluffy clouds: depth-tested against the world, never write depth, drawn before the AO so AO ignores them
+	if(cfg.cloudsCfg.enable)
+		Clouds_Draw();
+
 	// AO goes AFTER the colour filter: the filter blends a warm tint over the whole frame, so AO
 	// applied before it gets tinted too (dark yellow/brown patches). After it, the AO stays neutral.
 	if(cfg.ssao)
@@ -426,7 +430,7 @@ fixSeed(void)
 static void
 installColourFilterHook(void)
 {
-	if(!(cfg.blurEdges || cfg.ssao || cfg.postCfg.smaa || cfg.postCfg.fxaa || cfg.postCfg.sharpen)) return;
+	if(!(cfg.cloudsCfg.enable || cfg.blurEdges || cfg.ssao || cfg.postCfg.smaa || cfg.postCfg.fxaa || cfg.postCfg.sharpen)) return;
 	uint32_t prev = PTRFROMCALL(0x704D1E);        // current target of the call site (rel32 call/jmp)
 	if(prev == (uint32_t)myColourFilter) return;  // already hooked
 	oColourFilter = (DPColourFilterFn)prev;
@@ -454,7 +458,7 @@ DllMain(HINSTANCE hInst, DWORD reason, LPVOID)
 		if(cfg.grassFixPlacement)
 			InjectHook(0x5DADB7, fixSeed, PATCH_JUMP);
 		if(cfg.cloudsCfg.enable)
-			Clouds_Install(&cfg.cloudsCfg);                           // fluffy clouds (call site 0x7178F0)
+			Clouds_Install(&cfg.cloudsCfg);                           // fluffy clouds (drawn from the colour-filter hook)
 		// colour filter hook (AO / edge blur) is installed on the first rendered frame, see
 		// installColourFilterHook(), so it chains behind other mods' colour filters
 	}

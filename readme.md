@@ -53,5 +53,5 @@ every pixel samples the same lattice directly. `quality = 2` renders at full res
 - Copy `resources/fluffycloudsSA.txd` to `<GTA>\models\fluffycloudsSA.txd`.
 - Works with ANY timecyc mod: the colour is read every frame from the game's current timecyc state, so vanilla, 24h and custom timecycs all work and the clouds follow time of day and weather.
 - Clouds are depth-tested but never write depth, so the HBAO pass doesn't treat them as geometry.
-- Don't run it together with the standalone `FluffyCloudsSA.asi` (same hook).
+- Don't run it together with the standalone `FluffyCloudsSA.asi`.
 - `src/clouds.cpp` lists every game address it uses at the top; `dualpass_clouds.log` shows what it read.

@@ -2,7 +2,8 @@
 // Port of fluffyclouds-sa. Same maths as the original (37 billboards, 2-colour gradient, sun highlight),
 // but self-contained: own sprite batching, own Im2D submit, no plugin-sdk.
 //
-// Hook: the same call site the original mod uses (0x7178F0, runs while the sky/moving things are drawn).
+// Hook: called from DualPass' colour-filter hook (0x704D1E, already proven on this setup), after the game's own
+// filter and before the AO. The world depth buffer is intact there, so the clouds are depth-tested against it.
 // Colours: read every frame from the game's CURRENT timecyc colour set -> any timecyc mod works.
 // Depth: clouds are z-tested but never write depth, so DualPass' HBAO never sees them as geometry.
 //
@@ -25,7 +26,6 @@
 // The rest come from plugin-sdk / gta-reversed - if the game ever crashes on the first cloud frame,
 // compare these against plugin-sdk's headers first.
 // =====================================================================================================
-#define ADDR_HOOK_CALL        0x7178F0   // VERIFIED (fluffyclouds-sa: movingThingsEvent, H_CALL)
 #define ADDR_RwTextureRead    0x7F3AC0   // VERIFIED (fluffyclouds-sa Utility.h)
 #define ADDR_RwGlobals        0xC97B24   // VERIFIED (DualPass)
 #define ADDR_SceneCamera      0xC1703C   // VERIFIED (DualPass uses it as the scene RwCamera*)
@@ -222,9 +222,9 @@ static void dumpColourSet(const char *tag)
 }
 
 // ---------------- per frame ----------------
-static void Clouds_Render(void)
+void Clouds_Draw(void)
 {
-	if(gFailed) return;
+	if(!cfg.enable || gFailed) return;
 	RwCamera *cam = *(RwCamera**)ADDR_SceneCamera;
 	if(!cam || !cam->frameBuffer) return;
 
@@ -366,20 +366,6 @@ static void Clouds_Render(void)
 	rsSet(RS_TEXFILTER, (void*)(intptr_t)sFilter); rsSet(RS_TEXTURERASTER, sRaster);
 }
 
-// The call site may be a thiscall/cdecl/anything: the stub keeps every register and the stack untouched,
-// draws the clouds, then jumps to whatever the call used to point at (the game, or another mod's hook).
-static void __declspec(naked) hookStub(void)
-{
-	_asm {
-		pushad
-		pushfd
-		call Clouds_Render
-		popfd
-		popad
-		jmp dword ptr [gOrigHookTarget]
-	}
-}
-
 void Clouds_Install(const CloudsConfig *c)
 {
 	cfg = *c;
@@ -389,12 +375,7 @@ void Clouds_Install(const CloudsConfig *c)
 	if(cfg.size < 10) cfg.size = 10; if(cfg.size > 400) cfg.size = 400;
 	if(cfg.windSpeed < 0) cfg.windSpeed = 0; if(cfg.windSpeed > 500) cfg.windSpeed = 500;
 	if(cfg.log) remove("dualpass_clouds.log");
-
-	// the call site must still be a plain E8 call, otherwise another mod owns it - then we leave it alone
-	if(*(uint8_t*)ADDR_HOOK_CALL != 0xE8){
-		LOG("0x7178F0 is not a call instruction, fluffy clouds disabled");
-		return;
-	}
-	gOrigHookTarget = (void(*)(void))PTRFROMCALL(ADDR_HOOK_CALL);
-	InjectHook(ADDR_HOOK_CALL, hookStub);
+	// For the record: what sits at the original mod's hook site on this install (not used any more)
+	LOG("clouds are drawn from DualPass' colour-filter hook. bytes at 0x7178F0: %02X %02X %02X %02X %02X",
+		*(uint8_t*)0x7178F0, *(uint8_t*)0x7178F1, *(uint8_t*)0x7178F2, *(uint8_t*)0x7178F3, *(uint8_t*)0x7178F4);
 }
