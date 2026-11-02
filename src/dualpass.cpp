@@ -153,7 +153,7 @@ readConfig(HINSTANCE hInst)
 	if(cfg.postCfg.edgeThresh > 0.5f)  cfg.postCfg.edgeThresh = 0.5f;
 	if(cfg.postCfg.sharpAmount < 0.0f) cfg.postCfg.sharpAmount = 0.0f;
 	if(cfg.postCfg.sharpAmount > 1.0f) cfg.postCfg.sharpAmount = 1.0f;
-	cfg.ssaoCfg.interval    = readInt("AO", "updateInterval", 0, path);
+	cfg.ssaoCfg.interval    = readInt("AO", "updateInterval", 1, path);
 	if(cfg.ssaoCfg.interval < 0) cfg.ssaoCfg.interval = 0;
 	if(cfg.ssaoCfg.interval > 4) cfg.ssaoCfg.interval = 4;
 	if(cfg.def < 0)     cfg.def = cfg.global;

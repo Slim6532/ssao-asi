@@ -59,7 +59,21 @@ float2 SnapUV(float2 uv)
 float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 {
 	uv = SnapUV(uv - 0.5 * gView.zw);                          // full-res pixel (2i,2j), exact centre
-	float d0 = tex2Dlod(sDepth, float4(uv, 0, 0)).r;
+	// This half-res pixel stands for a 2x2 block of full-res pixels. Use the NEAREST pixel of the block
+	// (lowest depth) as its representative, so thin foreground things (poles, wires, fences, limbs)
+	// are not missed by the half-res grid and do not turn into blocky stair-steps.
+	float2 tx1 = float2(gView.z, 0);
+	float2 ty1 = float2(0, gView.w);
+	float dA = tex2Dlod(sDepth, float4(uv, 0, 0)).r;
+	float dB = tex2Dlod(sDepth, float4(uv + tx1, 0, 0)).r;
+	float dC = tex2Dlod(sDepth, float4(uv + ty1, 0, 0)).r;
+	float dD = tex2Dlod(sDepth, float4(uv + tx1 + ty1, 0, 0)).r;
+	float d0 = min(min(dA, dB), min(dC, dD));
+	float2 pick = uv;
+	if(d0 == dB)      pick = uv + tx1;
+	else if(d0 == dC) pick = uv + ty1;
+	else if(d0 == dD) pick = uv + tx1 + ty1;
+	uv = pick;                                                 // exact centre of the chosen full-res pixel
 	float zc = gProj.x / (gProj.y - d0 * gProj.z);
 	float zs0 = min(zc, 60000.0);                              // what the blur passes see as depth
 	float rPx = gProj.w / (2.0 * gView.x * zc) / gView.z;      // AO radius in full-res pixels
@@ -189,7 +203,9 @@ float4 PSComp(float2 uv : TEXCOORD0) : COLOR
 	{
 		float2 s  = tex2Dlod(sAO, float4(uv00 + float2(x, y) * gCfg2.yz, 0, 0)).rg;
 		float  wb = (x ? f.x : 1.0 - f.x) * (y ? f.y : 1.0 - f.y);
-		float  w  = wb * saturate(1.0 - abs(s.y - zc) / tol) + 1e-4;
+		// joint-bilateral with a heavy tail: similar depth -> full weight, different depth -> tiny weight,
+		// and if ALL four disagree the nearest-in-depth one wins smoothly (no blocky thin objects)
+		float  w  = wb / (abs(s.y - zc) + zc * 0.01 + 0.01);
 		sum  += s.x * w;
 		wsum += w;
 	}

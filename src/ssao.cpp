@@ -352,7 +352,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	int interval = c->interval;
 	if(interval <= 0){
 		float fps = gEma > 0.0f ? 1000.0f / gEma : 0.0f;
-		interval = fps > 240.0f ? 3 : (fps > 110.0f ? 2 : 1);
+		interval = fps > 200.0f ? 2 : 1;      // reused AO smears while moving, so only above ~200 FPS and never more than 1 frame old
 	}
 	bool compute = !gAOValid || ++gSkipCount >= interval;
 	if(compute){
