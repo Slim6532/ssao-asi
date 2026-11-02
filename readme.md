@@ -35,3 +35,8 @@ Don't run this together with skygfx.dll - they patch the same spots.
 `[Post]` in dualpass.ini. One extra full-screen pass (a StretchRect copy of the frame + one draw), applied after the colour filter and the AO and before the HUD.
 - FXAA only does extra work on edge pixels; sharpening is CAS-style (adaptive, avoids halos). Both are in the same shader (`src/post.hlsl`).
 - Press F10 (`toggleKey`) in game to switch it on/off and compare.
+
+## SMAA (optional)
+Add three files from https://github.com/iryoku/smaa to `src/` before building: `SMAA.hlsl`, `Textures/AreaTex.h`, `Textures/SearchTex.h`.
+The build then also compiles `src/post_smaa.hlsl` (3 passes: edges, blend weights, neighbourhood blend, SMAA 1x HIGH preset, luma edges)
+and `smaa = 1` in `[Post]` uses it. Without these files the mod still builds and uses FXAA. `dualpass_post.log` says which one runs.

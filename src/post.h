@@ -3,7 +3,8 @@
 // Call Post_Apply once per frame, after the colour filter and the AO.
 
 struct PostConfig {
-	int   fxaa;          // 1 = FXAA on
+	int   smaa;          // 1 = SMAA (needs SMAA.hlsl + AreaTex.h + SearchTex.h in src\, else falls back to FXAA)
+	int   fxaa;          // 1 = FXAA on (used when SMAA is off or unavailable)
 	float edgeThresh;    // FXAA edge threshold as a ratio of local brightness (0.125 = default, lower = more AA)
 	int   sharpen;       // 1 = sharpening on
 	float sharpAmount;   // 0..1

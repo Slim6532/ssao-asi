@@ -134,6 +134,7 @@ readConfig(HINSTANCE hInst)
 	cfg.ssaoCfg.minFps      = (float)readInt("AO", "minFps", 45, path);
 	cfg.ssaoCfg.toggleKey   = readInt("AO", "toggleKey", 120, path);   // 120 = F9
 	cfg.ssaoCfg.debugView   = readInt("AO", "debugView", 0, path);
+	cfg.postCfg.smaa        = readInt("Post", "smaa", 0, path);
 	cfg.postCfg.fxaa        = readInt("Post", "fxaa", 0, path);
 	cfg.postCfg.edgeThresh  = readInt("Post", "fxaaThreshold", 125, path) / 1000.0f;   // 125 = 0.125
 	cfg.postCfg.sharpen     = readInt("Post", "sharpen", 0, path);
@@ -326,7 +327,7 @@ myColourFilter(unsigned c1, unsigned c2)
 		SSAO_Apply(cam->nearPlane, cam->farPlane, cam->viewWindow.x, cam->viewWindow.y, &cfg.ssaoCfg);
 
 	// FXAA + sharpening last: it sees the final colour (colour mod + AO) and runs before the HUD
-	if(cfg.postCfg.fxaa || cfg.postCfg.sharpen)
+	if(cfg.postCfg.smaa || cfg.postCfg.fxaa || cfg.postCfg.sharpen)
 		Post_Apply(&cfg.postCfg);
 	if(!cfg.blurEdges) return;
 
@@ -394,7 +395,7 @@ fixSeed(void)
 static void
 installColourFilterHook(void)
 {
-	if(!(cfg.blurEdges || cfg.ssao || cfg.postCfg.fxaa || cfg.postCfg.sharpen)) return;
+	if(!(cfg.blurEdges || cfg.ssao || cfg.postCfg.smaa || cfg.postCfg.fxaa || cfg.postCfg.sharpen)) return;
 	uint32_t prev = PTRFROMCALL(0x704D1E);        // current target of the call site (rel32 call/jmp)
 	if(prev == (uint32_t)myColourFilter) return;  // already hooked
 	oColourFilter = (DPColourFilterFn)prev;
