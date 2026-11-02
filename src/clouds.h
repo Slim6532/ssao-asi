@@ -9,6 +9,7 @@ struct CloudsConfig {
 	int   brightness;      // percent multiplier on the timecyc colour (100 = unchanged)
 	int   whiten;          // 0..100: blend the timecyc colour towards white (0 = pure timecyc colour)
 	int   size;            // percent multiplier on the sprite size (100 = original)
+	int   distance;        // percent: how far out the cloud ring sits (100 = original ~200 units, 300 = near the horizon)
 	int   height;          // base height of the cloud layer in game units (original: 50)
 	int   highlight;       // 1 = additive sun highlight pass
 	int   windSpeed;       // percent, drift speed (original used CWeather::Wind, roughly 0..120)

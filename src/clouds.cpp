@@ -135,6 +135,7 @@ static void addQuad(float x, float y, float z, float w, float h, float rot, floa
 	// camera depth -> screen z (same formula the game's sprite code uses, with the device's real near/far z)
 	float screenz = gNear2D + (z - gNearClip) * (gFar2D - gNear2D) * gFarClip / ((gFarClip - gNearClip) * z);
 	screenz = clamp01(screenz);
+	if(screenz > 0.9999f) screenz = 0.9999f;      // clouds beyond the draw distance stay at the far plane
 
 	CVert *v = &gVerts[gNumSprites * 4];
 	for(int i = 0; i < 4; i++){
@@ -316,7 +317,8 @@ void Clouds_Draw(void)
 	rsSet(RS_TEXFILTER, (void*)2);           // linear
 
 	float rotSin = sinf(gCloudRotation), rotCos = cosf(gCloudRotation);
-	float sizeMul = 55.0f * cfg.size / 100.0f;
+	float dist = cfg.distance / 100.0f;                  // ring distance multiplier; sprites grow with it so they keep their apparent size
+	float sizeMul = 55.0f * cfg.size / 100.0f * dist;
 	float sunX = *(float*)ADDR_SunScreenX, sunY = *(float*)ADDR_SunScreenY;
 	bool sunOk = cfg.highlight && sunX > -20000.0f && sunX < 20000.0f && sunY > -20000.0f && sunY < 20000.0f;
 	float indRot = (uint16_t)gIndividualRotation / 65336.0f * 6.28f;
@@ -331,7 +333,7 @@ void Clouds_Draw(void)
 	rsSet(RS_TEXTURERASTER, gTexMask->raster);
 	gNumSprites = 0;
 	for(int i = 0; i < NUM_CLOUDS; i++){
-		RwV3d pos = { 2.0f * CoorsOffsetX[i], 2.0f * CoorsOffsetY[i], 40.0f * CoorsOffsetZ[i] + baseZ };
+		RwV3d pos = { 2.0f * CoorsOffsetX[i] * dist, 2.0f * CoorsOffsetY[i] * dist, 40.0f * CoorsOffsetZ[i] + baseZ };
 		RwV3d wp;
 		wp.x = pos.x * rotCos + pos.y * rotSin + campos.x;
 		wp.y = pos.x * rotSin - pos.y * rotCos + campos.y;
@@ -368,8 +370,8 @@ void Clouds_Draw(void)
 			if(!cl[i].on) continue;
 			float dx = cl[i].sp.x - sunX, dy = cl[i].sp.y - sunY;
 			ang = atan2f(dx, dy); if(ang < 0.0f) ang += 6.2831853f;     // angle from +Y, like CGeneral::GetATanOfXY
-			addSpriteHighlight(cl[i].sp.x, cl[i].sp.y, cl[i].sp.z, cl[i].sx * 30.0f * cfg.size / 100.0f,
-				cl[i].sy * 30.0f * cfg.size / 100.0f, (int)(200 * hilight), 1.0f / cl[i].sp.z, 1.7f - ang);
+			addSpriteHighlight(cl[i].sp.x, cl[i].sp.y, cl[i].sp.z, cl[i].sx * 30.0f * cfg.size / 100.0f * dist,
+				cl[i].sy * 30.0f * cfg.size / 100.0f * dist, (int)(200 * hilight), 1.0f / cl[i].sp.z, 1.7f - ang);
 		}
 		flushSprites();
 	}
@@ -388,6 +390,7 @@ void Clouds_Install(const CloudsConfig *c)
 	if(cfg.alpha < 0) cfg.alpha = 0; if(cfg.alpha > 255) cfg.alpha = 255;
 	if(cfg.brightness < 0) cfg.brightness = 0; if(cfg.brightness > 300) cfg.brightness = 300;
 	if(cfg.whiten < 0) cfg.whiten = 0; if(cfg.whiten > 100) cfg.whiten = 100;
+	if(cfg.distance < 50) cfg.distance = 50; if(cfg.distance > 1500) cfg.distance = 1500;
 	if(cfg.size < 10) cfg.size = 10; if(cfg.size > 400) cfg.size = 400;
 	if(cfg.windSpeed < 0) cfg.windSpeed = 0; if(cfg.windSpeed > 500) cfg.windSpeed = 500;
 	if(cfg.log) remove("dualpass_clouds.log");
