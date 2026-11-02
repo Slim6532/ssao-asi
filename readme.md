@@ -47,3 +47,11 @@ and `smaa = 1` in `[Post]` uses it. Without these files the mod still builds and
 4-pixel lattice, the SDK's own 4x4 random table, the cross-bilateral blur with depth-slope compensation and
 `pow(AO, power)` after the blur. D3D9 has no texture arrays / geometry shaders, so instead of the 16 deinterleaved slices
 every pixel samples the same lattice directly. `quality = 2` renders at full resolution like the original.
+
+## Fluffy Clouds (built in)
+`[FluffyClouds]` in dualpass.ini. Port of fluffyclouds-sa (GTA3/VC-style cloud sprites with the sun highlight), no plugin-sdk needed.
+- Copy `resources/fluffycloudsSA.txd` to `<GTA>\models\fluffycloudsSA.txd`.
+- Works with ANY timecyc mod: the colour is read every frame from the game's current timecyc state, so vanilla, 24h and custom timecycs all work and the clouds follow time of day and weather.
+- Clouds are depth-tested but never write depth, so the HBAO pass doesn't treat them as geometry.
+- Don't run it together with the standalone `FluffyCloudsSA.asi` (same hook).
+- `src/clouds.cpp` lists every game address it uses at the top; `dualpass_clouds.log` shows what it read.

@@ -25,6 +25,7 @@
 #include "MemoryMgr.h"
 #include "ssao.h"
 #include "post.h"
+#include "clouds.h"
 
 // ---------- things the plugin-sdk RenderWare headers don't provide ----------
 // alpha test render states / functions (RW 3.6 numbering)
@@ -76,6 +77,7 @@ static struct {
 	// native SSAO
 	int ssao; SSAOConfig ssaoCfg;
 	PostConfig postCfg;                          // FXAA + sharpening
+	CloudsConfig cloudsCfg;                      // fluffy clouds
 } cfg;
 static int gFixGrassPlacement;
 
@@ -160,6 +162,19 @@ readConfig(HINSTANCE hInst)
 	if(cfg.postCfg.edgeThresh > 0.5f)  cfg.postCfg.edgeThresh = 0.5f;
 	if(cfg.postCfg.sharpAmount < 0.0f) cfg.postCfg.sharpAmount = 0.0f;
 	if(cfg.postCfg.sharpAmount > 1.0f) cfg.postCfg.sharpAmount = 1.0f;
+	cfg.cloudsCfg.enable       = readInt("FluffyClouds", "fluffyClouds", 0, path);
+	cfg.cloudsCfg.alpha        = readInt("FluffyClouds", "alpha", 160, path);
+	cfg.cloudsCfg.brightness   = readInt("FluffyClouds", "brightness", 100, path);
+	cfg.cloudsCfg.size         = readInt("FluffyClouds", "size", 100, path);
+	cfg.cloudsCfg.height       = readInt("FluffyClouds", "height", 50, path);
+	cfg.cloudsCfg.highlight    = readInt("FluffyClouds", "highlight", 1, path);
+	cfg.cloudsCfg.windSpeed    = readInt("FluffyClouds", "windSpeed", 60, path);
+	cfg.cloudsCfg.fadeAtHeight = readInt("FluffyClouds", "fadeAtHeight", 0, path);
+	cfg.cloudsCfg.colorOffset  = readInt("FluffyClouds", "colorOffset", -1, path);
+	cfg.cloudsCfg.fallbackR    = readInt("FluffyClouds", "fallbackR", 235, path);
+	cfg.cloudsCfg.fallbackG    = readInt("FluffyClouds", "fallbackG", 235, path);
+	cfg.cloudsCfg.fallbackB    = readInt("FluffyClouds", "fallbackB", 240, path);
+	cfg.cloudsCfg.log          = readInt("FluffyClouds", "log", 1, path);
 	cfg.ssaoCfg.interval    = readInt("AO", "updateInterval", 1, path);
 	if(cfg.ssaoCfg.interval < 0) cfg.ssaoCfg.interval = 0;
 	if(cfg.ssaoCfg.interval > 4) cfg.ssaoCfg.interval = 4;
@@ -438,6 +453,8 @@ DllMain(HINSTANCE hInst, DWORD reason, LPVOID)
 			InjectHook(0x74721C, 0x7472F3, PATCH_JUMP);
 		if(cfg.grassFixPlacement)
 			InjectHook(0x5DADB7, fixSeed, PATCH_JUMP);
+		if(cfg.cloudsCfg.enable)
+			Clouds_Install(&cfg.cloudsCfg);                           // fluffy clouds (call site 0x7178F0)
 		// colour filter hook (AO / edge blur) is installed on the first rendered frame, see
 		// installColourFilterHook(), so it chains behind other mods' colour filters
 	}
