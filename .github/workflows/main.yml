@@ -9,6 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # RenderWare headers come from plugin-sdk (public repo); we only need the header folder
       - name: Get RenderWare headers
         shell: bash
         run: |
@@ -44,7 +45,7 @@ jobs:
             fxc /nologo /O3 /T ps_3_0 /E PSBlend  /Vn g_psSmaaBlend  /Fh src\smaa_ps_blend.h  src\post_smaa.hlsl || exit /b 1
           )
 
-       - name: Build dualpass.asi
+      - name: Build dualpass.asi
         shell: cmd
         run: cl /nologo /LD /O2 /MT /Zc:threadSafeInit- /I src /I "%RWINC%" src\dualpass.cpp src\ssao.cpp src\post.cpp src\clouds.cpp /Fe:dualpass.asi
 
