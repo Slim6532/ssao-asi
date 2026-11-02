@@ -35,6 +35,15 @@ jobs:
           fxc /nologo /O3 /T ps_3_0 /E PSComp /Vn g_psComp                              /Fh src\ssao_ps_comp.h  src\ssao.hlsl || exit /b 1
           fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsPost                              /Fh src\post_vs.h       src\post.hlsl || exit /b 1
           fxc /nologo /O3 /T ps_3_0 /E PSPost /Vn g_psPost                              /Fh src\post_ps.h       src\post.hlsl || exit /b 1
+          rem --- optional SMAA: only when the official files were added to src\ (otherwise FXAA is used) ---
+          if exist src\SMAA.hlsl if exist src\AreaTex.h if exist src\SearchTex.h (
+            fxc /nologo /O3 /T vs_3_0 /E VSEdge   /Vn g_vsSmaaEdge   /Fh src\smaa_vs_edge.h   src\post_smaa.hlsl || exit /b 1
+            fxc /nologo /O3 /T ps_3_0 /E PSEdge   /Vn g_psSmaaEdge   /Fh src\smaa_ps_edge.h   src\post_smaa.hlsl || exit /b 1
+            fxc /nologo /O3 /T vs_3_0 /E VSWeight /Vn g_vsSmaaWeight /Fh src\smaa_vs_weight.h src\post_smaa.hlsl || exit /b 1
+            fxc /nologo /O3 /T ps_3_0 /E PSWeight /Vn g_psSmaaWeight /Fh src\smaa_ps_weight.h src\post_smaa.hlsl || exit /b 1
+            fxc /nologo /O3 /T vs_3_0 /E VSBlend  /Vn g_vsSmaaBlend  /Fh src\smaa_vs_blend.h  src\post_smaa.hlsl || exit /b 1
+            fxc /nologo /O3 /T ps_3_0 /E PSBlend  /Vn g_psSmaaBlend  /Fh src\smaa_ps_blend.h  src\post_smaa.hlsl || exit /b 1
+          )
 
       - name: Build dualpass.asi
         shell: cmd
