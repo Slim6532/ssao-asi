@@ -14,6 +14,7 @@ float4 gView : register(c1);   // x = viewWindow.x, y = viewWindow.y, z = 1/full
 float4 gCfg  : register(c2);   // x = intensity, y = bias, z = max radius (full-res px), w = fade distance
 float4 gCfg2 : register(c3);   // x = power, y = 1/halfW, z = 1/halfH
 float4 gDir  : register(c4);   // blur step in uv units (one half-res texel along X or Y)
+float4 gCfg3 : register(c5);   // x = contact (small-scale) strength, y = large-scale strength, z = contact radius / radius
 float4 gRT   : register(c8);   // VS only: 1/width, 1/height of the current render target
 
 #ifndef NDIR
@@ -98,35 +99,51 @@ float4 PSAO(float2 uv : TEXCOORD0) : COLOR
 	// The noise tile / blur still cancel because the count only depends on distance.
 	float nd = (zc > gCfg.w * 0.5) ? max(2.0, floor(NDIR * 0.5 + 0.5)) : (float)NDIR;
 
-	float R2 = gProj.w * gProj.w;
-	float ao = 0;
+	// Two-scale AO, the way NVIDIA's HBAO+ does it (SmallScaleAO + LargeScaleAO):
+	//   large scale = the horizon term over the whole radius (soft, broad shading)
+	//   contact     = the same horizon term over a short radius only (crisp creases, grounds feet/props)
+	// Both come from the SAME samples, so the second term costs a few ALU ops, no extra fetches.
+	float R2     = gProj.w * gProj.w;
+	float Rs     = gProj.w * gCfg3.z;
+	float invR2  = 1.0 / R2;
+	float invRs2 = 1.0 / (Rs * Rs);
+	float aoL = 0, aoS = 0;
 	[unroll] for (int i = 0; i < NDIR; i++)
 	{
 	  [branch] if (i < nd)
 	  {
 		float  a   = (i + rot) * (6.2831853 / nd);
 		float2 dir = float2(cos(a), sin(a));
-		float  hmax = gCfg.y;                                   // horizon starts at the bias angle
-		float  aoDir = 0;
+		float  hL = gCfg.y;                                     // horizons start at the bias angle
+		float  hS = gCfg.y;
+		float  aoDirL = 0, aoDirS = 0;
 		[unroll] for (int j = 0; j < NSTEP; j++)
 		{
-			float t = ((j + 0.25 + 0.75 * jit) / NSTEP) * rPx;  // pixels
-			t = max(t, 1.5);
+			float u = (j + 0.25 + 0.75 * jit) / NSTEP;
+			u = u * (0.4 + 0.6 * u);                            // denser near the pixel: 2 taps in the contact zone, 2 reach the full radius
+			float t = max(u * rPx, 1.5);                        // pixels
 			float2 suv = SnapUV(uv + dir * t * gView.zw);       // snap: position must match the depth texel
 			float3 V   = ViewPos(suv, LinZ(suv)) - P;
 			float  d2  = dot(V, V);
 			float  h   = dot(N, V) * rsqrt(d2 + 1e-6);          // sin(elevation above tangent plane)
-			float  w   = saturate(1.0 - d2 / R2);               // HBAO distance falloff
-			// samples outside the radius must not raise the horizon (otherwise a far pole or wall
+			float  wL  = saturate(1.0 - d2 * invR2);            // large-scale distance falloff
+			float  wS  = saturate(1.0 - d2 * invRs2);           // contact distance falloff (short radius)
+			// samples outside a scale's radius must not raise ITS horizon (otherwise a far pole or wall
 			// "shadows" the real nearby occluders and leaves halos around foreground objects)
-			float  hn  = max(hmax, (d2 < R2) ? h : -1.0);
-			aoDir += (hn - hmax) * w;                           // only count NEW horizon height
-			hmax = hn;
+			float  hnL = max(hL, (wL > 0.0) ? h : -1.0);
+			float  hnS = max(hS, (wS > 0.0) ? h : -1.0);
+			aoDirL += (hnL - hL) * wL;                          // only count NEW horizon height
+			aoDirS += (hnS - hS) * wS;
+			hL = hnL;
+			hS = hnS;
 		}
-		ao += aoDir;
+		aoL += aoDirL;
+		aoS += aoDirS;
 	  }
 	}
-	ao /= nd;
+	// contact term is an ADDITION on top of the large-scale term (0.6 keeps overall brightness close to
+	// the single-scale version at the default strengths)
+	float ao = (aoL * gCfg3.y + aoS * gCfg3.x * 0.6) / nd;
 
 	float fade = saturate((gCfg.w - zc) / (gCfg.w * 0.35));
 	fade = fade * fade * (3.0 - 2.0 * fade);                    // smoothstep: no visible edge of the AO range

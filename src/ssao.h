@@ -8,6 +8,9 @@ struct SSAOConfig {
 	float intensity;     // 1 = normal
 	float power;         // contrast exponent (1 = linear)
 	float bias;          // horizon bias 0..0.5 (hides self-occlusion on curved surfaces)
+	float contactScale;  // small-scale (contact) AO strength, 1 = default, 0 = off
+	float largeScale;    // large-scale (horizon) AO strength, 1 = default
+	float contactRadius; // contact radius as a fraction of 'radius' (0.3 = 30%)
 	float fadeDist;      // AO fades out towards this distance
 	int   maxRadiusPx;   // cap on the screen-space radius (keeps texture fetches cache friendly)
 	float minFps;        // adaptive quality: drop quality when FPS stays below this. 0 = off

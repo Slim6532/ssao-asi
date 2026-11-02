@@ -129,6 +129,15 @@ readConfig(HINSTANCE hInst)
 	cfg.ssaoCfg.intensity   = readInt("AO", "intensity", 100, path) / 100.0f;
 	cfg.ssaoCfg.power       = readInt("AO", "power", 120, path) / 100.0f;
 	cfg.ssaoCfg.bias        = readInt("AO", "bias", 12, path) / 100.0f;
+	cfg.ssaoCfg.contactScale  = readInt("AO", "contactScale", 80, path) / 100.0f;
+	cfg.ssaoCfg.largeScale    = readInt("AO", "largeScale", 100, path) / 100.0f;
+	cfg.ssaoCfg.contactRadius = readInt("AO", "contactRadius", 30, path) / 100.0f;
+	if(cfg.ssaoCfg.contactScale  < 0.0f)  cfg.ssaoCfg.contactScale  = 0.0f;
+	if(cfg.ssaoCfg.contactScale  > 3.0f)  cfg.ssaoCfg.contactScale  = 3.0f;
+	if(cfg.ssaoCfg.largeScale    < 0.0f)  cfg.ssaoCfg.largeScale    = 0.0f;
+	if(cfg.ssaoCfg.largeScale    > 3.0f)  cfg.ssaoCfg.largeScale    = 3.0f;
+	if(cfg.ssaoCfg.contactRadius < 0.05f) cfg.ssaoCfg.contactRadius = 0.05f;
+	if(cfg.ssaoCfg.contactRadius > 1.0f)  cfg.ssaoCfg.contactRadius = 1.0f;
 	cfg.ssaoCfg.fadeDist    = (float)readInt("AO", "fadeDistance", 60, path);
 	cfg.ssaoCfg.maxRadiusPx = readInt("AO", "maxRadiusPx", 28, path);
 	cfg.ssaoCfg.minFps      = (float)readInt("AO", "minFps", 45, path);

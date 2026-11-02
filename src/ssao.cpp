@@ -313,6 +313,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	float vw[4]  = { vwX, vwY, 1.0f / (float)gW, 1.0f / (float)gH };
 	float cf[4]  = { c->intensity, c->bias, (float)c->maxRadiusPx, c->fadeDist };
 	float cf2[4] = { c->power, 1.0f / (float)gHW, 1.0f / (float)gHH, 0 };
+	float cf3[4] = { c->contactScale, c->largeScale, c->contactRadius, 0 };
 	float dirH[4] = { 1.0f / (float)gHW, 0, 0, 0 };
 	float dirV[4] = { 0, 1.0f / (float)gHH, 0, 0 };
 
@@ -333,6 +334,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	dev->SetPixelShaderConstantF(1, vw, 1);
 	dev->SetPixelShaderConstantF(2, cf, 1);
 	dev->SetPixelShaderConstantF(3, cf2, 1);
+	dev->SetPixelShaderConstantF(5, cf3, 1);
 
 	for(int s = 0; s < 2; s++){
 		DWORD f = D3DTEXF_POINT;            // every tap is at a texel centre; also needs no fp filtering

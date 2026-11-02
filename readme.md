@@ -40,3 +40,7 @@ Don't run this together with skygfx.dll - they patch the same spots.
 Add three files from https://github.com/iryoku/smaa to `src/` before building: `SMAA.hlsl`, `Textures/AreaTex.h`, `Textures/SearchTex.h`.
 The build then also compiles `src/post_smaa.hlsl` (3 passes: edges, blend weights, neighbourhood blend, SMAA 1x HIGH preset, luma edges)
 and `smaa = 1` in `[Post]` uses it. Without these files the mod still builds and uses FXAA. `dualpass_post.log` says which one runs.
+
+## Two-scale AO
+`largeScale` / `contactScale` / `contactRadius` in `[AO]` (same idea as HBAO+'s LargeScaleAO / SmallScaleAO). Both terms are computed from the same
+horizon samples, so the contact term adds almost no cost.
