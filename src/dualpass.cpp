@@ -165,6 +165,7 @@ readConfig(HINSTANCE hInst)
 	cfg.cloudsCfg.enable       = readInt("FluffyClouds", "fluffyClouds", 0, path);
 	cfg.cloudsCfg.alpha        = readInt("FluffyClouds", "alpha", 160, path);
 	cfg.cloudsCfg.brightness   = readInt("FluffyClouds", "brightness", 100, path);
+	cfg.cloudsCfg.whiten       = readInt("FluffyClouds", "whiten", 0, path);
 	cfg.cloudsCfg.size         = readInt("FluffyClouds", "size", 100, path);
 	cfg.cloudsCfg.height       = readInt("FluffyClouds", "height", 50, path);
 	cfg.cloudsCfg.highlight    = readInt("FluffyClouds", "highlight", 1, path);

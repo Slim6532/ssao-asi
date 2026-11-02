@@ -272,8 +272,23 @@ void Clouds_Draw(void)
 	// base colour from the CURRENT timecyc
 	int br, bg, bb;
 	if(!readTimecycColour(br, bg, bb)){ br = cfg.fallbackR; bg = cfg.fallbackG; bb = cfg.fallbackB; }
+	int rawR = br, rawG = bg, rawB = bb;
 	br = br * cfg.brightness / 100; bg = bg * cfg.brightness / 100; bb = bb * cfg.brightness / 100;
 	if(br > 255) br = 255; if(bg > 255) bg = 255; if(bb > 255) bb = 255;
+	if(cfg.whiten > 0){            // pull towards white: dark / brown timecyc colours turn into light puffy clouds
+		br += (255 - br) * cfg.whiten / 100;
+		bg += (255 - bg) * cfg.whiten / 100;
+		bb += (255 - bb) * cfg.whiten / 100;
+	}
+	// log what the timecyc really gives us every 5 s (max 60 lines) - shows how it changes with time of day
+	if(cfg.log){
+		static DWORD lastLog; static int nLog;
+		DWORD t = GetTickCount();
+		if(nLog < 60 && t - lastLog > 5000){
+			lastLog = t; nLog++;
+			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, fog %.2f, alpha %d", rawR, rawG, rawB, br, bg, bb, fog, fluffyalpha);
+		}
+	}
 	int tr = (int)(br * 0.85f), tg = (int)(bg * 0.85f), tb = (int)(bb * 0.85f);
 
 	gScrW = (float)cam->frameBuffer->width;
@@ -372,6 +387,7 @@ void Clouds_Install(const CloudsConfig *c)
 	if(!cfg.enable) return;
 	if(cfg.alpha < 0) cfg.alpha = 0; if(cfg.alpha > 255) cfg.alpha = 255;
 	if(cfg.brightness < 0) cfg.brightness = 0; if(cfg.brightness > 300) cfg.brightness = 300;
+	if(cfg.whiten < 0) cfg.whiten = 0; if(cfg.whiten > 100) cfg.whiten = 100;
 	if(cfg.size < 10) cfg.size = 10; if(cfg.size > 400) cfg.size = 400;
 	if(cfg.windSpeed < 0) cfg.windSpeed = 0; if(cfg.windSpeed > 500) cfg.windSpeed = 500;
 	if(cfg.log) remove("dualpass_clouds.log");

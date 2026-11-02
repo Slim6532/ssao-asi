@@ -7,6 +7,7 @@ struct CloudsConfig {
 	int   enable;          // 1 = draw fluffy clouds
 	int   alpha;           // 0..255 base cloud alpha (original: 160)
 	int   brightness;      // percent multiplier on the timecyc colour (100 = unchanged)
+	int   whiten;          // 0..100: blend the timecyc colour towards white (0 = pure timecyc colour)
 	int   size;            // percent multiplier on the sprite size (100 = original)
 	int   height;          // base height of the cloud layer in game units (original: 50)
 	int   highlight;       // 1 = additive sun highlight pass
