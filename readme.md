@@ -41,6 +41,9 @@ Add three files from https://github.com/iryoku/smaa to `src/` before building: `
 The build then also compiles `src/post_smaa.hlsl` (3 passes: edges, blend weights, neighbourhood blend, SMAA 1x HIGH preset, luma edges)
 and `smaa = 1` in `[Post]` uses it. Without these files the mod still builds and uses FXAA. `dualpass_post.log` says which one runs.
 
-## Two-scale AO
-`largeScale` / `contactScale` / `contactRadius` in `[AO]` (same idea as HBAO+'s LargeScaleAO / SmallScaleAO). Both terms are computed from the same
-horizon samples, so the contact term adds almost no cost.
+## AO = NVIDIA HBAO+ 3.1 port
+`src/ssao.hlsl` ports the shaders from the HBAO+ 3.1 SDK to D3D9 / ps_3_0: the same per-sample AO term
+`saturate(N.V - bias) * falloff` (summed, small-scale first step + large-scale steps 2-4), 8 directions x 4 steps on the
+4-pixel lattice, the SDK's own 4x4 random table, the cross-bilateral blur with depth-slope compensation and
+`pow(AO, power)` after the blur. D3D9 has no texture arrays / geometry shaders, so instead of the 16 deinterleaved slices
+every pixel samples the same lattice directly. `quality = 2` renders at full resolution like the original.

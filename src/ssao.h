@@ -1,16 +1,16 @@
 #pragma once
-// Native HBAO-style ambient occlusion for GTA SA 1.0 US (D3D9). No ReShade.
+// Native ambient occlusion for GTA SA 1.0 US (D3D9), a port of NVIDIA HBAO+ 3.1. No ReShade.
 // Call SSAO_Apply once per frame, after the 3D scene is drawn and before the HUD.
 
 struct SSAOConfig {
-	int   quality;       // 0 = low (3x3 taps), 1 = medium (4x4), 2 = high (6x5)
+	int   quality;       // 0 = fast (4 directions, half res), 1 = HBAO+ (8 directions, half res), 2 = HBAO+ at FULL resolution
 	float radius;        // AO radius in game units (1 unit ~ 1 metre)
-	float intensity;     // 1 = normal
-	float power;         // contrast exponent (1 = linear)
-	float bias;          // horizon bias 0..0.5 (hides self-occlusion on curved surfaces)
-	float contactScale;  // small-scale (contact) AO strength, 1 = default, 0 = off
-	float largeScale;    // large-scale (horizon) AO strength, 1 = default
-	float contactRadius; // contact radius as a fraction of 'radius' (0.3 = 30%)
+	float intensity;     // multiplier on both scales, 1 = NVIDIA default
+	float power;         // NVIDIA PowerExponent: final AO = pow(AO, power), 1..4, default 2
+	float bias;          // NVIDIA Bias 0..0.5 (hides low-tessellation artifacts), default 0.1
+	float smallScale;    // NVIDIA SmallScaleAO 0..2 (first step, crisp contact darkening), default 1
+	float largeScale;    // NVIDIA LargeScaleAO 0..2 (steps 2..4, soft broad shading), default 1
+	float blurSharpness; // NVIDIA Blur.Sharpness 0..16 (higher = blur preserves edges more), default 16
 	float fadeDist;      // AO fades out towards this distance
 	int   maxRadiusPx;   // cap on the screen-space radius (keeps texture fetches cache friendly)
 	float minFps;        // adaptive quality: drop quality when FPS stays below this. 0 = off

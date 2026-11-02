@@ -2,8 +2,9 @@
 //
 //  * INTZ depth: hooks IDirect3DDevice9::SetDepthStencilSurface + Reset so the game's main depth
 //    surface becomes a sampleable INTZ texture.
-//  * Per frame (SSAO_Apply), all at HALF resolution except the last pass:
-//      1. AO (horizon based)  -> A
+//  * Port of NVIDIA HBAO+ 3.1 (see ssao.hlsl). Per frame (SSAO_Apply), at AO resolution (half for
+//    quality 0/1, full for quality 2) except the last pass:
+//      1. AO (HBAO+ sampling)  -> A
 //      2. blur horizontal     A -> B
 //      3. blur vertical       B -> A
 //      4. depth-aware upsample A -> backbuffer, multiplied onto the scene (full res)
@@ -58,7 +59,9 @@ static Reset_t  oReset;
 static IDirect3DDevice9 *gLastDev;
 static bool gHooked, gFailed;
 static UINT gW, gH;                         // backbuffer = main depth surface size
-static UINT gHW, gHH;                       // half resolution
+static UINT gHW, gHH;                       // AO resolution (half, or full for quality 2)
+static int  gAOScale = 2;                   // AO texel size in full-res pixels: 2 = half res, 1 = full res
+static IDirect3DTexture9 *gRandTex;         // NVIDIA's 4x4 random jitter table (managed, survives Reset)
 
 static IDirect3DTexture9      *gDepthTex, *gTexA, *gTexB;
 static IDirect3DSurface9      *gDepthSurf, *gSurfA, *gSurfB;
@@ -79,7 +82,7 @@ static void dropAll(void)
 {
 	gAOFmt = D3DFMT_UNKNOWN;                // re-probe on a new device
 	dropDefaultPool();
-	REL(gVS); REL(gPSBlur); REL(gPSComp); REL(gDecl);
+	REL(gVS); REL(gPSBlur); REL(gPSComp); REL(gDecl); REL(gRandTex);
 	for(int i = 0; i < 3; i++) REL(gPSAO[i]);
 }
 
@@ -90,7 +93,7 @@ static void readBackbufferSize(IDirect3DDevice9 *dev)
 	if(SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb){
 		if(SUCCEEDED(bb->GetDesc(&d))){
 			gW = d.Width; gH = d.Height;
-			gHW = (gW + 1) / 2; gHH = (gH + 1) / 2;
+			gHW = (gW + gAOScale - 1) / gAOScale; gHH = (gH + gAOScale - 1) / gAOScale;
 		}
 		bb->Release();
 	}
@@ -163,6 +166,53 @@ static bool createAOTex(IDirect3DDevice9 *dev, IDirect3DTexture9 **out)
 	return false;
 }
 
+
+// NVIDIA RandomTexture.cpp: 16 jitters from the SDK's own Mersenne-Twister numbers (3 per jitter).
+// R = r1 (rotation fraction), G = r2 (start jitter); the shader picks jitter[(y&3)*4 + (x&3)].
+static const float kMT[48] = {
+	0.463937,0.340042,0.223035,0.468465,0.322224,0.979269,
+	0.031798,0.973392,0.778313,0.456168,0.258593,0.330083,
+	0.387332,0.380117,0.179842,0.910755,0.511623,0.092933,
+	0.180794,0.620153,0.101348,0.556342,0.642479,0.442008,
+	0.215115,0.475218,0.157357,0.568868,0.501241,0.629229,
+	0.699218,0.707733,0.556725,0.005520,0.708315,0.583199,
+	0.236644,0.992380,0.981091,0.119804,0.510866,0.560499,
+	0.961497,0.557862,0.539955,0.332871,0.417807,0.920779
+};
+
+static bool createRandTex(IDirect3DDevice9 *dev)
+{
+	if(gRandTex) return true;
+	if(FAILED(dev->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &gRandTex, NULL))){
+		LOG("random table texture failed");
+		gFailed = true; return false;
+	}
+	D3DLOCKED_RECT lr;
+	if(FAILED(gRandTex->LockRect(0, &lr, NULL, 0))) return false;
+	for(int y = 0; y < 4; y++)
+		for(int x = 0; x < 4; x++){
+			int i = y * 4 + x;                  // slice id
+			BYTE *p = (BYTE*)lr.pBits + y * lr.Pitch + x * 4;
+			p[0] = 0;                                              // B
+			p[1] = (BYTE)(kMT[3 * i + 1] * 255.0f + 0.5f);          // G = r2
+			p[2] = (BYTE)(kMT[3 * i + 0] * 255.0f + 0.5f);          // R = r1
+			p[3] = 255;                                            // A
+		}
+	gRandTex->UnlockRect(0);
+	return true;
+}
+
+// quality 2 renders the AO at full resolution (like the real HBAO+), 0/1 at half resolution
+static void setAOScale(int s)
+{
+	if(s == gAOScale) return;
+	gAOScale = s;
+	REL(gSurfA); REL(gSurfB); REL(gTexA); REL(gTexB);
+	gAOValid = false;
+	if(gW){ gHW = (gW + s - 1) / s; gHH = (gH + s - 1) / s; }
+	LOG("AO resolution -> %ux%u", gHW, gHH);
+}
+
 static bool ensureResources(IDirect3DDevice9 *dev)
 {
 	if(!gVS){
@@ -182,6 +232,8 @@ static bool ensureResources(IDirect3DDevice9 *dev)
 			gFailed = true; return false;
 		}
 	}
+	if(!createRandTex(dev))
+		return false;
 	if(!gTexA && !createAOTex(dev, &gTexA))
 		return false;
 	if(!gTexB && !createAOTex(dev, &gTexB))
@@ -299,6 +351,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	}
 	if(q < 0 || gMode == 2) return;         // governor or toggle key switched AO off
 	if(!gW || !gH) return;                  // minimized / mode change in progress
+	setAOScale(q >= 2 ? 1 : 2);             // quality 2 = full-res AO
 	if(!ensureResources(dev)){
 		if(frame % 600 == 0) LOG("ensureResources failed (AO targets or state block)");
 		return;
@@ -311,9 +364,15 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 
 	float pr[4]  = { nearZ * farZ, farZ, farZ - nearZ, c->radius };
 	float vw[4]  = { vwX, vwY, 1.0f / (float)gW, 1.0f / (float)gH };
-	float cf[4]  = { c->intensity, c->bias, (float)c->maxRadiusPx, c->fadeDist };
-	float cf2[4] = { c->power, 1.0f / (float)gHW, 1.0f / (float)gHH, 0 };
-	float cf3[4] = { c->contactScale, c->largeScale, c->contactRadius, 0 };
+	// NVIDIA GlobalConstants::SetAOParameters
+	float bias    = c->bias < 0.0f ? 0.0f : (c->bias > 0.5f ? 0.5f : c->bias);
+	float R       = c->radius < 0.01f ? 0.01f : c->radius;
+	float factor  = 1.0f / (1.0f - bias);
+	float smallA  = c->smallScale * c->intensity * factor * 2.0f;
+	float largeA  = c->largeScale * c->intensity * factor;
+	float cf[4]  = { 0, c->blurSharpness, (float)c->maxRadiusPx, c->fadeDist };
+	float cf2[4] = { c->power, 1.0f / (float)gHW, 1.0f / (float)gHH, (float)gAOScale };
+	float cf3[4] = { smallA, largeA, -1.0f / (R * R), bias };
 	float dirH[4] = { 1.0f / (float)gHW, 0, 0, 0 };
 	float dirV[4] = { 0, 1.0f / (float)gHH, 0, 0 };
 
@@ -336,14 +395,16 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	dev->SetPixelShaderConstantF(3, cf2, 1);
 	dev->SetPixelShaderConstantF(5, cf3, 1);
 
-	for(int s = 0; s < 2; s++){
+	for(int s = 0; s < 3; s++){
 		DWORD f = D3DTEXF_POINT;            // every tap is at a texel centre; also needs no fp filtering
+		DWORD a = s == 2 ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP;   // s2 = the tiled 4x4 random table
 		dev->SetSamplerState(s, D3DSAMP_MINFILTER, f);
 		dev->SetSamplerState(s, D3DSAMP_MAGFILTER, f);
 		dev->SetSamplerState(s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
-		dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-		dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+		dev->SetSamplerState(s, D3DSAMP_ADDRESSU, a);
+		dev->SetSamplerState(s, D3DSAMP_ADDRESSV, a);
 	}
+	dev->SetTexture(2, gRandTex);
 	dev->SetTexture(0, gDepthTex);
 
 	// Amortise: at very high FPS the AO (the expensive part) is recomputed only every 2nd / 3rd frame
@@ -358,7 +419,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	if(compute){
 		gSkipCount = 0;
 
-	// ---- 1. AO (half res) -> A ----
+	// ---- 1. AO (AO resolution) -> A ----
 	dev->SetTexture(1, NULL);
 	setTarget(dev, gSurfA, gHW, gHH);
 	dev->SetPixelShader(gPSAO[q]);
@@ -396,6 +457,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	// ---- restore ----
 	dev->SetTexture(0, NULL);
 	dev->SetTexture(1, NULL);
+	dev->SetTexture(2, NULL);
 	dev->SetRenderTarget(0, oldRT);
 	dev->SetDepthStencilSurface(oldDS);     // already our INTZ surface, hook passes it through
 	gSB->Apply();
