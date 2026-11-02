@@ -165,10 +165,10 @@ static void addSprite2Colours(float x, float y, float z, float w, float h, int r
 	addQuad(x, y, z, w, h, rot, recipz, col);
 }
 
-// highlight sprite: flat red-ish additive glow (original: r*intens>>8, g = b = 0)
-static void addSpriteHighlight(float x, float y, float z, float w, float h, int r, float recipz, float rot)
+// highlight sprite: flat additive glow in the sun's colour (the original used a fixed red)
+static void addSpriteHighlight(float x, float y, float z, float w, float h, int r, int g, int b, float recipz, float rot)
 {
-	unsigned c = pack(r, 0, 0, 255);
+	unsigned c = pack(r, g, b, 255);
 	unsigned col[4] = { c, c, c, c };
 	addQuad(x, y, z, w, h, rot, recipz, col);
 }
@@ -263,7 +263,25 @@ void Clouds_Draw(void)
 	// alpha: configured alpha, faded by fog weather; optionally by camera height
 	float fog = *(float*)ADDR_Foggyness;
 	if(!(fog >= 0.0f && fog <= 1.0f)) fog = 0.0f;
-	int fluffyalpha = (int)(cfg.alpha * (1.0f - fog));
+
+	// time of day, from the live timecyc (brightness of the sky-bottom colour): 0 = night, 1 = day.
+	// Also the sun colour (sun core). Both come from the same colour set, so any timecyc mod works.
+	float day = 1.0f; int sunR = 255, sunG = 190, sunB = 130;
+	{
+		const uint16_t *sb = (const uint16_t*)(ADDR_CurrentColours + 0x2A);   // sky bottom RGB (verified by the dump)
+		const uint16_t *sc = (const uint16_t*)(ADDR_CurrentColours + 0x30);   // sun core RGB   (verified by the dump)
+		if(sb[0] <= 255 && sb[1] <= 255 && sb[2] <= 255){
+			float luma = 0.30f * sb[0] + 0.59f * sb[1] + 0.11f * sb[2];
+			day = clamp01((luma - 35.0f) / 95.0f);
+			day = day * day * (3.0f - 2.0f * day);
+		}
+		if(sc[0] <= 255 && sc[1] <= 255 && sc[2] <= 255){
+			int mx = sc[0] > sc[1] ? sc[0] : sc[1]; if(sc[2] > mx) mx = sc[2];
+			if(mx > 40){ sunR = sc[0] * 255 / mx; sunG = sc[1] * 255 / mx; sunB = sc[2] * 255 / mx; }
+		}
+		sunR += (255 - sunR) / 4; sunG += (255 - sunG) / 4; sunB += (255 - sunB) / 4;   // a bit of white in the glow
+	}
+	int fluffyalpha = (int)((cfg.nightAlpha + (cfg.alpha - cfg.nightAlpha) * day) * (1.0f - fog));
 	float baseZ = (float)cfg.height;
 	if(cfg.fadeAtHeight && campos.z > baseZ)
 		fluffyalpha -= (int)((campos.z - baseZ) * ((255.0f - (float)cfg.alpha) / 255.0f));
@@ -276,10 +294,19 @@ void Clouds_Draw(void)
 	int rawR = br, rawG = bg, rawB = bb;
 	br = br * cfg.brightness / 100; bg = bg * cfg.brightness / 100; bb = bb * cfg.brightness / 100;
 	if(br > 255) br = 255; if(bg > 255) bg = 255; if(bb > 255) bb = 255;
-	if(cfg.whiten > 0){            // pull towards white: dark / brown timecyc colours turn into light puffy clouds
-		br += (255 - br) * cfg.whiten / 100;
-		bg += (255 - bg) * cfg.whiten / 100;
-		bb += (255 - bb) * cfg.whiten / 100;
+	int wh = (int)(cfg.whiten * day);          // pull towards white in daylight only (clouds must not glow white at night)
+	if(wh > 0){
+		br += (255 - br) * wh / 100;
+		bg += (255 - bg) * wh / 100;
+		bb += (255 - bb) * wh / 100;
+	}
+	{	// night: darker, with a cool moonlit blue-grey tint
+		float n = 1.0f - day;
+		float dim = 1.0f - n * (1.0f - cfg.nightBrightness / 100.0f);
+		float tint = n * cfg.nightTint / 100.0f;
+		br = (int)((br * dim) * (1.0f - tint) + 70.0f * tint);
+		bg = (int)((bg * dim) * (1.0f - tint) + 85.0f * tint);
+		bb = (int)((bb * dim) * (1.0f - tint) + 120.0f * tint);
 	}
 	// log what the timecyc really gives us every 5 s (max 60 lines) - shows how it changes with time of day
 	if(cfg.log){
@@ -287,7 +314,7 @@ void Clouds_Draw(void)
 		DWORD t = GetTickCount();
 		if(nLog < 60 && t - lastLog > 5000){
 			lastLog = t; nLog++;
-			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, fog %.2f, alpha %d", rawR, rawG, rawB, br, bg, bb, fog, fluffyalpha);
+			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, day %.2f, sun %d %d %d, fog %.2f, alpha %d", rawR, rawG, rawB, br, bg, bb, day, sunR, sunG, sunB, fog, fluffyalpha);
 		}
 	}
 	int tr = (int)(br * 0.85f), tg = (int)(bg * 0.85f), tb = (int)(bb * 0.85f);
@@ -347,9 +374,10 @@ void Clouds_Draw(void)
 				float sundist = sqrtf(dx*dx + dy*dy);
 				float distLimit = (3.0f * gScrW) / 4.0f;
 				if(sundist < distLimit){
-					hilight = (1.0f - fog) * (1.0f - sundist / distLimit);
-					r1 = (int)(tr*(1.0f-hilight) + 255*hilight); g1 = (int)(tg*(1.0f-hilight) + 150*hilight); b1 = (int)(tb*(1.0f-hilight) + 150*hilight);
-					r2 = (int)(br*(1.0f-hilight) + 255*hilight); g2 = (int)(bg*(1.0f-hilight) + 150*hilight); b2 = (int)(bb*(1.0f-hilight) + 150*hilight);
+					hilight = (1.0f - fog) * (1.0f - sundist / distLimit) * day * (cfg.sunGlow / 100.0f);
+					if(hilight > 1.0f) hilight = 1.0f;
+					r1 = (int)(tr*(1.0f-hilight) + sunR*hilight); g1 = (int)(tg*(1.0f-hilight) + sunG*hilight); b1 = (int)(tb*(1.0f-hilight) + sunB*hilight);
+					r2 = (int)(br*(1.0f-hilight) + sunR*hilight); g2 = (int)(bg*(1.0f-hilight) + sunG*hilight); b2 = (int)(bb*(1.0f-hilight) + sunB*hilight);
 				}
 			}
 			addSprite2Colours(sp.x, sp.y, sp.z, szx * sizeMul, szy * sizeMul,
@@ -371,7 +399,8 @@ void Clouds_Draw(void)
 			float dx = cl[i].sp.x - sunX, dy = cl[i].sp.y - sunY;
 			ang = atan2f(dx, dy); if(ang < 0.0f) ang += 6.2831853f;     // angle from +Y, like CGeneral::GetATanOfXY
 			addSpriteHighlight(cl[i].sp.x, cl[i].sp.y, cl[i].sp.z, cl[i].sx * 30.0f * cfg.size / 100.0f * dist,
-				cl[i].sy * 30.0f * cfg.size / 100.0f * dist, (int)(200 * hilight), 1.0f / cl[i].sp.z, 1.7f - ang);
+				cl[i].sy * 30.0f * cfg.size / 100.0f * dist, (int)(sunR * 0.8f * hilight), (int)(sunG * 0.8f * hilight), (int)(sunB * 0.8f * hilight),
+				1.0f / cl[i].sp.z, 1.7f - ang);
 		}
 		flushSprites();
 	}
@@ -389,6 +418,10 @@ void Clouds_Install(const CloudsConfig *c)
 	if(!cfg.enable) return;
 	if(cfg.alpha < 0) cfg.alpha = 0; if(cfg.alpha > 255) cfg.alpha = 255;
 	if(cfg.brightness < 0) cfg.brightness = 0; if(cfg.brightness > 300) cfg.brightness = 300;
+	if(cfg.nightAlpha < 0) cfg.nightAlpha = 0; if(cfg.nightAlpha > 255) cfg.nightAlpha = 255;
+	if(cfg.nightBrightness < 0) cfg.nightBrightness = 0; if(cfg.nightBrightness > 300) cfg.nightBrightness = 300;
+	if(cfg.nightTint < 0) cfg.nightTint = 0; if(cfg.nightTint > 100) cfg.nightTint = 100;
+	if(cfg.sunGlow < 0) cfg.sunGlow = 0; if(cfg.sunGlow > 300) cfg.sunGlow = 300;
 	if(cfg.whiten < 0) cfg.whiten = 0; if(cfg.whiten > 100) cfg.whiten = 100;
 	if(cfg.distance < 50) cfg.distance = 50; if(cfg.distance > 1500) cfg.distance = 1500;
 	if(cfg.size < 10) cfg.size = 10; if(cfg.size > 400) cfg.size = 400;

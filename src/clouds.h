@@ -7,6 +7,10 @@ struct CloudsConfig {
 	int   enable;          // 1 = draw fluffy clouds
 	int   alpha;           // 0..255 base cloud alpha (original: 160)
 	int   brightness;      // percent multiplier on the timecyc colour (100 = unchanged)
+	int   nightAlpha;      // 0..255 cloud alpha at night (daytime uses "alpha", it blends with the time of day)
+	int   nightBrightness; // percent: how dark the clouds get at night
+	int   nightTint;       // 0..100: how much cool moonlit blue-grey the night clouds get
+	int   sunGlow;         // percent: strength of the sun-coloured glow on clouds near the sun (needs highlight = 1)
 	int   whiten;          // 0..100: blend the timecyc colour towards white (0 = pure timecyc colour)
 	int   size;            // percent multiplier on the sprite size (100 = original)
 	int   distance;        // percent: how far out the cloud ring sits (100 = original ~200 units, 300 = near the horizon)
