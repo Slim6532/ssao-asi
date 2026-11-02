@@ -47,7 +47,7 @@ jobs:
 
       - name: Build dualpass.asi
         shell: cmd
-        run: cl /nologo /LD /O2 /MT /Zc:threadSafeInit- /I src /I "%RWINC%" src\dualpass.cpp src\ssao.cpp src\post.cpp /Fe:dualpass.asi
+        run: cl /nologo /LD /O2 /MT /Zc:threadSafeInit- /I src /I "%RWINC%" src\dualpass.cpp src\ssao.cpp src\post.cpp src\clouds.cpp /Fe:dualpass.asi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -55,3 +55,4 @@ jobs:
           path: |
             dualpass.asi
             dualpass.ini
+            resources/fluffycloudsSA.txd
