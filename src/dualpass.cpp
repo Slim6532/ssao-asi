@@ -128,10 +128,13 @@ readConfig(HINSTANCE hInst)
 	cfg.ssaoCfg.radius      = readInt("AO", "radius", 15, path) / 10.0f;
 	cfg.ssaoCfg.intensity   = readInt("AO", "intensity", 100, path) / 100.0f;
 	cfg.ssaoCfg.power       = readInt("AO", "power", 200, path) / 100.0f;
-	cfg.ssaoCfg.bias        = readInt("AO", "bias", 10, path) / 100.0f;
+	cfg.ssaoCfg.bias        = readInt("AO", "bias", 20, path) / 100.0f;
 	cfg.ssaoCfg.smallScale  = readInt("AO", "smallScale", 100, path) / 100.0f;
 	cfg.ssaoCfg.largeScale  = readInt("AO", "largeScale", 100, path) / 100.0f;
 	cfg.ssaoCfg.blurSharpness = readInt("AO", "blurSharpness", 16, path) * 1.0f;
+	cfg.ssaoCfg.normalPower   = readInt("AO", "normalPower", 8, path) * 1.0f;
+	if(cfg.ssaoCfg.normalPower < 1.0f)  cfg.ssaoCfg.normalPower = 1.0f;
+	if(cfg.ssaoCfg.normalPower > 32.0f) cfg.ssaoCfg.normalPower = 32.0f;
 	if(cfg.ssaoCfg.power < 1.0f) cfg.ssaoCfg.power = 1.0f;
 	if(cfg.ssaoCfg.power > 4.0f) cfg.ssaoCfg.power = 4.0f;
 	if(cfg.ssaoCfg.bias  < 0.0f) cfg.ssaoCfg.bias  = 0.0f;

@@ -11,6 +11,7 @@ struct SSAOConfig {
 	float smallScale;    // NVIDIA SmallScaleAO 0..2 (first step, crisp contact darkening), default 1
 	float largeScale;    // NVIDIA LargeScaleAO 0..2 (steps 2..4, soft broad shading), default 1
 	float blurSharpness; // NVIDIA Blur.Sharpness 0..16 (higher = blur preserves edges more), default 16
+	float normalPower;   // how strictly the blur/upsample match surface normals (1..32, default 8)
 	float fadeDist;      // AO fades out towards this distance
 	int   maxRadiusPx;   // cap on the screen-space radius (keeps texture fetches cache friendly)
 	float minFps;        // adaptive quality: drop quality when FPS stays below this. 0 = off

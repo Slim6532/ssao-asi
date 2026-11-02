@@ -370,7 +370,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	float factor  = 1.0f / (1.0f - bias);
 	float smallA  = c->smallScale * c->intensity * factor * 2.0f;
 	float largeA  = c->largeScale * c->intensity * factor;
-	float cf[4]  = { 0, c->blurSharpness, (float)c->maxRadiusPx, c->fadeDist };
+	float cf[4]  = { c->normalPower, c->blurSharpness, (float)c->maxRadiusPx, c->fadeDist };
 	float cf2[4] = { c->power, 1.0f / (float)gHW, 1.0f / (float)gHH, (float)gAOScale };
 	float cf3[4] = { smallA, largeA, -1.0f / (R * R), bias };
 	float dirH[4] = { 1.0f / (float)gHW, 0, 0, 0 };

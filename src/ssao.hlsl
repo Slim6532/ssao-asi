@@ -21,7 +21,7 @@ sampler2D sRand  : register(s2);   // 4x4 jitter table: R = rotation fraction r1
 
 float4 gProj : register(c0);   // x = near*far, y = far, z = far-near, w = radius (world units)
 float4 gView : register(c1);   // x = viewWindow.x (tan half fov x), y = viewWindow.y, z = 1/fullW, w = 1/fullH
-float4 gCfg  : register(c2);   // x = unused, y = blur sharpness, z = max radius (full-res px), w = fade distance
+float4 gCfg  : register(c2);   // x = normal-match exponent, y = blur sharpness, z = max radius (full-res px), w = fade distance
 float4 gCfg2 : register(c3);   // x = power, y = 1/aoW, z = 1/aoH, w = AO texel size in full-res px (1 or 2)
 float4 gDir  : register(c4);   // blur step in uv units (one AO texel along X or Y)
 float4 gCfg3 : register(c5);   // x = small-scale amount, y = large-scale amount, z = -1/R^2, w = NDotV bias
@@ -75,7 +75,9 @@ float3 DecodeN(float2 xy)
 // without it the leg's AO leaks into the ground (light fringe) and the foot shadow onto the leg.
 float NormalWeight(float3 A, float3 B)
 {
-	return pow(saturate(dot(A, B)), 16.0) + 0.001;
+	// exponent (gCfg.x, "normalPower" in the ini): high = strict (cleanest silhouettes, but low-poly models
+	// like peds break into hard facets); low = smooth (peds smooth, a faint fringe can return at silhouettes)
+	return pow(saturate(dot(A, B)), gCfg.x) + 0.002;
 }
 
 // ---- NVIDIA ReconstructNormal_Common.hlsl ----
