@@ -9,7 +9,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # RenderWare headers come from plugin-sdk (public repo); we only need the header folder
       - name: Get RenderWare headers
         shell: bash
         run: |
