@@ -1,14 +1,14 @@
-// atmos.cpp - depth fog + bloom + heat haze for GTA SA 1.0 US (D3D9), as ONE extra screen-space pass.
+// atmos.cpp - depth fog + bloom for GTA SA 1.0 US (D3D9), as ONE extra screen-space pass.
 //
 // Order in a frame: game colour filter -> fluffy clouds -> AO -> ATMOSPHERE -> FXAA/SMAA -> HUD.
 //   1. one StretchRect copy of the finished frame
 //   2. bloom (if on): bright-pass to a quarter-res target, horizontal blur, vertical blur
-//   3. one full-screen pass over the frame: heat haze (UV wobble) -> depth fog -> + bloom
+//   3. one full-screen pass over the frame: depth fog -> + bloom
 //
 // Everything that depends on the game's look is read from the live timecyc, so it works with any timecyc mod:
 //   fog colour = sky-bottom colour, fog distance = timecyc fog start / far clip, day/night = sky brightness,
 //   sun colour = sun core colour.
-// Fog and heat haze need the INTZ depth of the AO module (ssao = 1). Bloom works without it.
+// Fog needs the INTZ depth of the AO module (ssao = 1). Bloom works without it.
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <windows.h>
@@ -206,7 +206,7 @@ void Atmos_Apply(float nearZ, float farZ, const AtmosConfig *c)
 	IDirect3DDevice9 *dev = gDev;
 	if(!dev || gFailed || !c->enable) return;
 	gLogOn = c->log != 0;
-	if(!c->fog && !c->bloom && !c->haze) return;
+	if(!c->fog && !c->bloom) return;
 	updateToggle(c);
 	if(gOff) return;
 
@@ -214,7 +214,7 @@ void Atmos_Apply(float nearZ, float farZ, const AtmosConfig *c)
 		dropAll();
 		gLastDev = dev;
 		if(!gHooked) installHook(dev);
-		LOG("atmosphere started (fog=%d bloom=%d haze=%d)", c->fog, c->bloom, c->haze);
+		LOG("atmosphere started (fog=%d bloom=%d)", c->fog, c->bloom);
 	}
 
 	IDirect3DSurface9 *rt = NULL;
@@ -225,16 +225,15 @@ void Atmos_Apply(float nearZ, float farZ, const AtmosConfig *c)
 	IDirect3DTexture9 *depth = SSAO_GetDepthTexture();
 	bool interior = *(int*)ADDR_CurrArea != 0;
 	bool doFog = c->fog && depth && !interior;
-	bool doHaze = c->haze && depth && !interior;
 	bool doBloom = c->bloom != 0;
 	{
 		static bool warned;
-		if(!depth && (c->fog || c->haze) && !warned){
+		if(!depth && c->fog && !warned){
 			warned = true;
-			LOG("no depth texture (the AO module must be on: ssao = 1) -> fog and heat haze are skipped, bloom still works");
+			LOG("no depth texture (the AO module must be on: ssao = 1) -> fog is skipped, bloom still works");
 		}
 	}
-	if(!doFog && !doHaze && !doBloom){ REL(rt); return; }
+	if(!doFog && !doBloom){ REL(rt); return; }
 	if(!ensureResources(dev, d, doBloom)){ REL(rt); return; }
 	if(doBloom && !gBloomA) doBloom = false;
 
@@ -334,8 +333,7 @@ void Atmos_Apply(float nearZ, float farZ, const AtmosConfig *c)
 	float sun[4]  = { sunU, sunV, (doFog && sunOk) ? 1.0f : 0.0f, (float)gW / (float)gH };
 	float sunC[4] = { ur / 255.0f, ug / 255.0f, ub / 255.0f, 0 };
 	float bl[4]   = { bloomI, bloomT, 0.18f, 0 };
-	float hz[4]   = { c->hazeStrength / 10000.0f * day, (float)(GetTickCount() * 0.001 * (c->hazeSpeed / 100.0)), (float)c->hazeStart, (float)c->hazeEnd };
-	float flag[4] = { doFog ? 1.0f : 0.0f, doBloom ? 1.0f : 0.0f, doHaze ? 1.0f : 0.0f, 0 };
+	float flag[4] = { doFog ? 1.0f : 0.0f, doBloom ? 1.0f : 0.0f, 0, 0 };
 	dev->SetVertexShaderConstantF(8, rtPx, 1);
 	dev->SetPixelShaderConstantF(0, px, 1);
 	dev->SetPixelShaderConstantF(1, fogC, 1);
@@ -343,13 +341,12 @@ void Atmos_Apply(float nearZ, float farZ, const AtmosConfig *c)
 	dev->SetPixelShaderConstantF(3, sun, 1);
 	dev->SetPixelShaderConstantF(4, sunC, 1);
 	dev->SetPixelShaderConstantF(5, bl, 1);
-	dev->SetPixelShaderConstantF(6, hz, 1);
 	dev->SetPixelShaderConstantF(7, flag, 1);
 	setSampler(dev, 0, D3DTEXF_LINEAR);
 	setSampler(dev, 1, D3DTEXF_POINT);
 	setSampler(dev, 2, D3DTEXF_LINEAR);
 	dev->SetTexture(0, gScene);
-	dev->SetTexture(1, (doFog || doHaze) ? depth : NULL);
+	dev->SetTexture(1, doFog ? depth : NULL);
 	dev->SetTexture(2, doBloom ? gBloomA : NULL);
 	dev->SetPixelShader(gPSFinal);
 	drawQuad(dev);

@@ -56,9 +56,8 @@ every pixel samples the same lattice directly. `quality = 2` renders at full res
 - Don't run it together with the standalone `FluffyCloudsSA.asi`.
 - `src/clouds.cpp` lists every game address it uses at the top; `dualpass_clouds.log` shows what it read.
 
-## Atmosphere (fog + bloom + heat haze)
+## Atmosphere (fog + bloom)
 `[Atmosphere]` in dualpass.ini, source in `src/atmos.cpp` + `src/atmos.hlsl`. One extra screen-space pass after the AO and before FXAA/SMAA.
 - Fog is depth based, coloured with the live timecyc sky colour, warm towards the sun. Needs `ssao = 1` (it uses the AO module's INTZ depth).
 - Bloom (quarter-res bright-pass + separable blur) makes lit windows, lamps, headlights and siren lights glow, more at night.
-- Heat haze wobbles distant scenery in daylight.
 - Not included (needs hooks into the game's own lighting / particle code): new headlight beams, siren lights, neon interior lights with shadows, soft particles.

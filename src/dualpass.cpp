@@ -79,7 +79,7 @@ static struct {
 	int ssao; SSAOConfig ssaoCfg;
 	PostConfig postCfg;                          // FXAA + sharpening
 	CloudsConfig cloudsCfg;                      // fluffy clouds
-	AtmosConfig atmosCfg;                        // depth fog + bloom + heat haze
+	AtmosConfig atmosCfg;                        // depth fog + bloom
 } cfg;
 static int gFixGrassPlacement;
 
@@ -179,11 +179,6 @@ readConfig(HINSTANCE hInst)
 	cfg.atmosCfg.bloomThresholdNight = readInt("Atmosphere", "bloomThresholdNight", 50, path);
 	cfg.atmosCfg.bloomNightBoost     = readInt("Atmosphere", "bloomNightBoost", 80, path);
 	cfg.atmosCfg.bloomSize           = readInt("Atmosphere", "bloomSize", 100, path);
-	cfg.atmosCfg.haze                = readInt("Atmosphere", "heatHaze", 1, path);
-	cfg.atmosCfg.hazeStrength        = readInt("Atmosphere", "heatHazeStrength", 30, path);
-	cfg.atmosCfg.hazeStart           = readInt("Atmosphere", "heatHazeStart", 80, path);
-	cfg.atmosCfg.hazeEnd             = readInt("Atmosphere", "heatHazeEnd", 300, path);
-	cfg.atmosCfg.hazeSpeed           = readInt("Atmosphere", "heatHazeSpeed", 100, path);
 	cfg.atmosCfg.log                 = readInt("Atmosphere", "log", 1, path);
 	{
 		AtmosConfig &a = cfg.atmosCfg;
@@ -198,10 +193,6 @@ readConfig(HINSTANCE hInst)
 		if(a.bloomThresholdNight < 0) a.bloomThresholdNight = 0; if(a.bloomThresholdNight > 100) a.bloomThresholdNight = 100;
 		if(a.bloomNightBoost < 0) a.bloomNightBoost = 0; if(a.bloomNightBoost > 500) a.bloomNightBoost = 500;
 		if(a.bloomSize < 30) a.bloomSize = 30; if(a.bloomSize > 300) a.bloomSize = 300;
-		if(a.hazeStrength < 0) a.hazeStrength = 0; if(a.hazeStrength > 100) a.hazeStrength = 100;
-		if(a.hazeStart < 1) a.hazeStart = 1; if(a.hazeStart > 2000) a.hazeStart = 2000;
-		if(a.hazeEnd < a.hazeStart + 1) a.hazeEnd = a.hazeStart + 1; if(a.hazeEnd > 3000) a.hazeEnd = 3000;
-		if(a.hazeSpeed < 0) a.hazeSpeed = 0; if(a.hazeSpeed > 500) a.hazeSpeed = 500;
 	}
 	cfg.cloudsCfg.enable          = readInt("FluffyClouds", "fluffyClouds", 0, path);
 	cfg.cloudsCfg.alpha           = readInt("FluffyClouds", "alpha", 160, path);
@@ -423,7 +414,7 @@ myColourFilter(unsigned c1, unsigned c2)
 	if(cfg.ssao)
 		SSAO_Apply(cam->nearPlane, cam->farPlane, cam->viewWindow.x, cam->viewWindow.y, &cfg.ssaoCfg);
 
-	// atmosphere (depth fog + bloom + heat haze): after the AO, so the AO also fades into the fog; before the AA pass
+	// atmosphere (depth fog + bloom): after the AO, so the AO also fades into the fog; before the AA pass
 	if(cfg.atmosCfg.enable)
 		Atmos_Apply(cam->nearPlane, cam->farPlane, &cfg.atmosCfg);
 

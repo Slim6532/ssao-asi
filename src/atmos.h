@@ -1,7 +1,7 @@
 #pragma once
-// Atmosphere pass for GTA SA 1.0 US (D3D9): depth fog, bloom and heat haze in screen space.
+// Atmosphere pass for GTA SA 1.0 US (D3D9): depth fog and bloom in screen space.
 // Call Atmos_Apply once per frame, after the AO and before the post (FXAA/SMAA) pass.
-// Fog and heat haze need the INTZ depth texture of the AO module (ssao = 1); bloom works without it.
+// Fog needs the INTZ depth texture of the AO module (ssao = 1); bloom works without it (but then the sky blooms too).
 
 struct AtmosConfig {
 	int enable;
@@ -21,12 +21,6 @@ struct AtmosConfig {
 	int bloomThresholdNight; // same at night (lower = lit windows and lamps glow)
 	int bloomNightBoost;     // percent extra intensity at night
 	int bloomSize;           // percent: size of the glow
-	// --- heat haze ---
-	int haze;
-	int hazeStrength;        // 0-100
-	int hazeStart;           // game units: distortion starts here, full strength at hazeEnd
-	int hazeEnd;
-	int hazeSpeed;           // percent
 	int log;
 };
 

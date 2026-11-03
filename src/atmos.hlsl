@@ -1,9 +1,9 @@
-// atmos.hlsl - depth fog, bloom and heat haze for GTA SA (D3D9, ps_3_0)
+// atmos.hlsl - depth fog and bloom for GTA SA (D3D9, ps_3_0)
 //
 //   VSMain   : fullscreen quad
 //   PSBright : quarter-res bright-pass (soft threshold) from the finished frame
 //   PSBlur   : separable gaussian blur (5 bilinear taps = 9-tap), direction in gDir
-//   PSAtmos  : final pass. heat haze (UV wobble on distant pixels) -> depth fog -> + bloom
+//   PSAtmos  : final pass. depth fog -> + bloom
 
 sampler2D sScene : register(s0);   // copy of the finished frame (bilinear, clamp). For the blur: the bloom source
 sampler2D sDepth : register(s1);   // INTZ depth (point)
@@ -15,8 +15,7 @@ float4 gFogP  : register(c2);   // x = start, y = end (game units), z = curve, w
 float4 gSun   : register(c3);   // xy = sun uv, z = sun valid, w = aspect (width / height)
 float4 gSunC  : register(c4);   // rgb = sun colour 0..1
 float4 gBloom : register(c5);   // x = intensity, y = threshold, z = knee
-float4 gHaze  : register(c6);   // x = strength (uv), y = time, z = start dist, w = end dist
-float4 gFlag  : register(c7);   // x = fog on, y = bloom on, z = haze on
+float4 gFlag  : register(c7);   // x = fog on, y = bloom on, w = (bright-pass) depth available
 float4 gDir   : register(c9);   // blur direction in uv units of the blur target
 float4 gRT    : register(c8);   // VS only: 1/width, 1/height of the render target
 
@@ -66,7 +65,7 @@ float4 PSBlur(float2 uv : TEXCOORD0) : COLOR
 	return float4(s, 1);
 }
 
-// ---------------- fog + heat haze ----------------
+// ---------------- fog ----------------
 float LinZ(float d)
 {
 	float n = gPx.z;
@@ -74,39 +73,11 @@ float LinZ(float d)
 	return n * f / (f - d * (f - n));                      // z = n*f / (f - d*(f-n))
 }
 
-float HazeT(float d)                                       // 0 near .. 1 far, 0 on the sky
-{
-	float t = saturate((LinZ(d) - gHaze.z) / max(gHaze.w - gHaze.z, 1.0));
-	return (d < 0.99999) ? t : 0.0;
-}
-
-float2 HazeOffset(float2 uv, float t)
-{
-	float band = 1.0 - smoothstep(0.0, 0.40, abs(uv.y - 0.55));     // strongest in the band around the horizon
-	float ph = gHaze.y;
-	float2 o;
-	o.x = sin(uv.y * 70.0 + ph * 2.7 + sin(uv.x * 9.0 + ph) * 1.5);
-	o.y = sin(uv.x * 55.0 - ph * 2.1 + sin(uv.y * 11.0 - ph * 0.7) * 1.5) * 0.35;
-	return o * gHaze.x * t * band;
-}
-
 float4 PSAtmos(float2 uv : TEXCOORD0) : COLOR
 {
 	float d0 = tex2Dlod(sDepth, float4(uv, 0, 0)).r;
 	float z0 = LinZ(d0);
-	float2 uvS = uv;
-
-	// heat haze: wobble the lookup of distant pixels. Never pull in foreground pixels (no smearing at silhouettes)
-	if (gFlag.z > 0.5)
-	{
-		float t0 = HazeT(d0);
-		float2 off = HazeOffset(uv, t0);
-		float d1 = tex2Dlod(sDepth, float4(uv + off, 0, 0)).r;
-		float k = saturate(HazeT(d1) / max(t0, 0.001));
-		uvS = uv + off * k;
-	}
-
-	float3 col = S(uvS);
+	float3 col = S(uv);
 
 	// depth fog in the sky colour, warm towards the sun. The sky itself (depth 1) is left alone.
 	if (gFlag.x > 0.5 && d0 < 0.99999)
