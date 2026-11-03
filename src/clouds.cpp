@@ -1,10 +1,11 @@
 // clouds.cpp - Fluffy Clouds (GTA3/VC style cloud sprites) for GTA SA 1.0 US, inside DualPass.
-// Port of fluffyclouds-sa. Same maths as the original (37 billboards, 2-colour gradient, sun highlight),
-// but self-contained: own sprite batching, own Im2D submit, no plugin-sdk.
+// Port of fluffyclouds-sa, extended: sun-lit clouds (bright sun side, dark underside, warm rim), horizon fade,
+// per-session variety and a second, higher/farther/slower layer. Self-contained: own sprite batching, own Im2D
+// submit, no plugin-sdk.
 //
 // Hook: called from DualPass' colour-filter hook (0x704D1E, already proven on this setup), after the game's own
 // filter and before the AO. The world depth buffer is intact there, so the clouds are depth-tested against it.
-// Colours: read every frame from the game's CURRENT timecyc colour set -> any timecyc mod works.
+// Colours: read every frame from the game's live timecyc state -> any timecyc mod works.
 // Depth: clouds are z-tested but never write depth, so DualPass' HBAO never sees them as geometry.
 //
 // Needs fluffycloudsSA.txd in <GTA>\models\ (textures "cloudmasked" + "cloudhilit").
@@ -22,9 +23,8 @@
 #include "clouds.h"
 
 // =====================================================================================================
-// Game addresses, SA 1.0 US.  VERIFIED = confirmed by the fluffyclouds-sa source or by DualPass itself.
-// The rest come from plugin-sdk / gta-reversed - if the game ever crashes on the first cloud frame,
-// compare these against plugin-sdk's headers first.
+// Game addresses, SA 1.0 US.  VERIFIED = confirmed by the fluffyclouds-sa source, by DualPass itself, or by
+// the dualpass_clouds.log dump. The rest come from plugin-sdk / gta-reversed.
 // =====================================================================================================
 #define ADDR_RwTextureRead    0x7F3AC0   // VERIFIED (fluffyclouds-sa Utility.h)
 #define ADDR_RwGlobals        0xC97B24   // VERIFIED (DualPass)
@@ -40,9 +40,11 @@
 #define ADDR_Foggyness        0xC81300   // CWeather::Foggyness (float 0..1)  (address confirmed by MTA's source)
 #define ADDR_SunScreenX       0xC3E028   // CCoronas::SunScreenX
 #define ADDR_SunScreenY       0xC3E02C   // CCoronas::SunScreenY
-#define ADDR_CurrentColours   0xB7C4A0   // CTimeCycle::m_CurrentColours (CColourSet)
-// offset of m_nFluffyCloudsBottomRed/Green/Blue (3 x uint16) inside CColourSet. Override: ini colorOffset
-#define DEFAULT_COLOUR_OFFSET 0x62
+#define ADDR_CurrentColours   0xB7C4A0   // CTimeCycle::m_CurrentColours (CColourSet)  VERIFIED by the log dump
+// byte offsets inside CColourSet, VERIFIED by the log dump (sky bottom, sun core, fluffy bottom neighbours)
+#define OFF_SKY_BOTTOM        0x2A       // 3 x uint16
+#define OFF_SUN_CORE          0x30       // 3 x uint16
+#define DEFAULT_COLOUR_OFFSET 0x62       // fluffy clouds bottom RGB, 3 x uint16
 
 // RW render states / values (RW 3.6 numbering, same numbers DualPass already uses)
 enum {
@@ -60,10 +62,9 @@ static void rsSet(int s, void *v) { DWORD g = *(DWORD*)ADDR_RwGlobals; ((StateFn
 static void rsGet(int s, void *v) { DWORD g = *(DWORD*)ADDR_RwGlobals; ((StateFn)*(DWORD*)(g + 0x24))(s, v); }
 
 static CloudsConfig cfg;
-static void (*gOrigHookTarget)(void);          // what the call site pointed at before us (read by the naked stub)
 static RwTexture *gTexMask, *gTexHilite;
 static bool gInitDone, gFailed;
-static float gCloudRotation;
+static float gCloudRotation, gCloudRotation2;
 static uint32_t gIndividualRotation;
 static LARGE_INTEGER gLastTime;
 
@@ -76,7 +77,21 @@ static void LOG(const char *fmt, ...)
 	fputc('\n', f); fclose(f);
 }
 
-// ---------------- cloud layout (identical to the original) ----------------
+static inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+static inline float lerpf(float a, float b, float t) { return a + (b - a) * t; }
+static inline float smooth01(float t) { t = clamp01(t); return t * t * (3.0f - 2.0f * t); }
+static inline unsigned pack(int r, int g, int b, int a)
+{
+	if(r < 0) r = 0; if(r > 255) r = 255;
+	if(g < 0) g = 0; if(g > 255) g = 255;
+	if(b < 0) b = 0; if(b > 255) b = 255;
+	if(a < 0) a = 0; if(a > 255) a = 255;
+	return ((unsigned)a << 24) | ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
+}
+
+// ---------------- cloud layout ----------------
+// Layer 1 = the original 37 sprites (offsets as in the original mod), optionally jittered per session.
+// Layer 2 = random sprites, higher, farther and slower.
 static const float CoorsOffsetX[37] = {
 	0.0f, 60.0f, 72.0f, 48.0f, 21.0f, 12.0f, 9.0f, -3.0f, -8.4f, -18.0f, -15.0f, -36.0f,
 	-40.0f, -48.0f, -60.0f, -24.0f, 100.0f, 100.0f, 100.0f, 100.0f, 100.0f, 100.0f, 100.0f, 100.0f,
@@ -89,12 +104,57 @@ static const float CoorsOffsetZ[37] = {
 	2.0f, 1.0f, 0.0f, 0.3f, 0.7f, 1.4f, 1.7f, 0.24f, 0.7f, 1.3f, 1.6f, 1.0f,
 	1.2f, 0.3f, 0.7f, 1.4f, 0.0f, 0.1f, 0.5f, 0.4f, 0.55f, 0.75f, 1.0f, 1.4f,
 	1.7f, 2.0f, 2.0f, 2.3f, 1.9f, 2.4f, 2.0f, 2.0f, 1.5f, 1.2f, 1.7f, 1.5f, 2.1f };
-#define NUM_CLOUDS 37
+#define NUM_L1 37
+#define MAX_L2 48
+#define MAX_SPRITES (NUM_L1 + MAX_L2)
 
-// ---------------- sprite batch (replaces CSprite2) ----------------
+struct CloudDef {
+	float ox, oy, oz;    // offset from the camera before the distance multiplier (oz is height above the layer base)
+	float size;          // size multiplier
+	float alpha;         // alpha multiplier
+	float rot;           // extra rotation (radians)
+	int   layer;         // 0 or 1
+};
+static CloudDef gClouds[MAX_SPRITES];
+static int gNumClouds;
+static uint32_t gRng = 2463534242u;
+static float rnd01(void) { gRng ^= gRng << 13; gRng ^= gRng >> 17; gRng ^= gRng << 5; return (gRng & 0xFFFFFF) / 16777216.0f; }
+static float rndS(void) { return rnd01() * 2.0f - 1.0f; }
+
+static void buildLayout(void)
+{
+	LARGE_INTEGER q; QueryPerformanceCounter(&q);
+	gRng = ((uint32_t)q.QuadPart ^ (uint32_t)GetTickCount() * 2654435761u) | 1u;   // different layout every session
+	float v = cfg.variety / 100.0f;
+	gNumClouds = 0;
+	for(int i = 0; i < NUM_L1; i++){
+		CloudDef &c = gClouds[gNumClouds++];
+		c.ox = 2.0f * CoorsOffsetX[i] + rndS() * 24.0f * v;
+		c.oy = 2.0f * CoorsOffsetY[i] + rndS() * 24.0f * v;
+		c.oz = 40.0f * CoorsOffsetZ[i] + rndS() * 20.0f * v;
+		c.size  = 1.0f + rndS() * 0.30f * v;
+		c.alpha = 1.0f - rnd01() * 0.30f * v;
+		c.rot   = rndS() * 3.14159f * v;
+		c.layer = 0;
+	}
+	if(cfg.layer2){
+		for(int i = 0; i < cfg.layer2Count && gNumClouds < MAX_SPRITES; i++){
+			CloudDef &c = gClouds[gNumClouds++];
+			float ang = rnd01() * 6.2831853f, r = 150.0f + rnd01() * 150.0f;
+			c.ox = cosf(ang) * r; c.oy = sinf(ang) * r;
+			c.oz = rnd01() * 70.0f;
+			c.size  = 0.60f + rnd01() * 0.80f;
+			c.alpha = 0.60f + rnd01() * 0.40f;
+			c.rot   = rnd01() * 6.2831853f;
+			c.layer = 1;
+		}
+	}
+}
+
+// ---------------- sprite batch ----------------
 struct CVert { float x, y, z, rhw; unsigned color; float u, v; };   // RwIm2DVertex, D3D9 layout
-static CVert gVerts[NUM_CLOUDS * 4];
-static unsigned short gIdx[NUM_CLOUDS * 6];
+static CVert gVerts[MAX_SPRITES * 4];
+static unsigned short gIdx[MAX_SPRITES * 6];
 static int gNumSprites;
 static float gNear2D, gFar2D, gNearClip, gFarClip, gScrW, gScrH;
 
@@ -106,17 +166,7 @@ static void flushSprites(void)
 	gNumSprites = 0;
 }
 
-static inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
-static inline unsigned pack(int r, int g, int b, int a)
-{
-	if(r < 0) r = 0; if(r > 255) r = 255;
-	if(g < 0) g = 0; if(g > 255) g = 255;
-	if(b < 0) b = 0; if(b > 255) b = 255;
-	if(a < 0) a = 0; if(a > 255) a = 255;
-	return ((unsigned)a << 24) | ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
-}
-
-// one rotated quad. c0..c3: per-corner colour (already packed)
+// one rotated quad with a colour per corner
 static void addQuad(float x, float y, float z, float w, float h, float rot, float recipz, const unsigned col[4])
 {
 	float c = cosf(rot), s = sinf(rot);
@@ -130,7 +180,7 @@ static void addQuad(float x, float y, float z, float w, float h, float rot, floa
 	if(ys[0] < 0 && ys[1] < 0 && ys[2] < 0 && ys[3] < 0) return;
 	if(xs[0] > gScrW && xs[1] > gScrW && xs[2] > gScrW && xs[3] > gScrW) return;
 	if(ys[0] > gScrH && ys[1] > gScrH && ys[2] > gScrH && ys[3] > gScrH) return;
-	if(gNumSprites >= NUM_CLOUDS) return;
+	if(gNumSprites >= MAX_SPRITES) return;
 
 	// camera depth -> screen z (same formula the game's sprite code uses, with the device's real near/far z)
 	float screenz = gNear2D + (z - gNearClip) * (gFar2D - gNear2D) * gFarClip / ((gFarClip - gNearClip) * z);
@@ -148,24 +198,36 @@ static void addQuad(float x, float y, float z, float w, float h, float rot, floa
 	gNumSprites++;
 }
 
-// body cloud: colour fades from rgb1 (top) to rgb2 (bottom) along (cx,cy) rotated with the sprite
-static void addSprite2Colours(float x, float y, float z, float w, float h, int r1, int g1, int b1,
-	int r2, int g2, int b2, float cx, float cy, float recipz, float rot, int a)
+// Lit cloud sprite. Each corner gets its own colour:
+//   - top of the cloud is lit by the sky, the underside is darker                (shading)
+//   - the side facing the sun takes the sun's colour, the far side is a bit darker (sun, sunC, sdx/sdy = screen direction to the sun)
+static void addLitSprite(float x, float y, float z, float w, float h, float rot, float recipz,
+	const float base[3], float sdx, float sdy, float sun, const float sunC[3], float shading, int a)
 {
 	float c = cosf(rot), s = sinf(rot);
-	float cf[4];
-	cf[0] = clamp01((cx * (-c - s) + cy * (-c + s)) * 0.5f + 0.5f);
-	cf[1] = clamp01((cx * (-c + s) + cy * ( c + s)) * 0.5f + 0.5f);
-	cf[2] = clamp01((cx * ( c + s) + cy * ( c - s)) * 0.5f + 0.5f);
-	cf[3] = clamp01((cx * ( c - s) + cy * (-c - s)) * 0.5f + 0.5f);
+	const float ux[4] = { -c - s, -c + s, c + s, c - s };
+	const float uy[4] = { -c + s, c + s, c - s, -c - s };
 	unsigned col[4];
-	for(int i = 0; i < 4; i++)
-		col[i] = pack((int)(r1*cf[i] + r2*(1.0f-cf[i])), (int)(g1*cf[i] + g2*(1.0f-cf[i])),
-		              (int)(b1*cf[i] + b2*(1.0f-cf[i])), a);
+	for(int i = 0; i < 4; i++){
+		float nx = ux[i] * 0.7071f, ny = uy[i] * 0.7071f;          // corner offset, -1..1, y points down
+		float top = clamp01(0.5f - ny * 0.5f);                       // 1 at the top of the sprite, 0 at the bottom
+		float f = 0.62f + 0.46f * top;                               // 0.62 (underside) .. 1.08 (top)
+		f = 1.0f + (f - 1.0f) * shading;
+		float side = clamp01((nx * sdx + ny * sdy) * 0.5f + 0.5f);   // 1 = corner facing the sun
+		float lit = side * side * sun;
+		float dark = (1.0f - side) * sun * 0.25f * shading;
+		float rgb[3];
+		for(int k = 0; k < 3; k++){
+			float v = base[k] * f;
+			v = lerpf(v, sunC[k], lit * 0.80f);
+			rgb[k] = v * (1.0f - dark);
+		}
+		col[i] = pack((int)rgb[0], (int)rgb[1], (int)rgb[2], a);
+	}
 	addQuad(x, y, z, w, h, rot, recipz, col);
 }
 
-// highlight sprite: flat additive glow in the sun's colour (the original used a fixed red)
+// additive sun glow sprite (the original used a fixed red; this uses the sun's colour)
 static void addSpriteHighlight(float x, float y, float z, float w, float h, int r, int g, int b, float recipz, float rot)
 {
 	unsigned c = pack(r, g, b, 255);
@@ -197,16 +259,18 @@ static bool initTextures(void)
 	return ok && gTexMask && gTexHilite;
 }
 
-// ---------------- timecyc colour (works with any timecyc mod) ----------------
+// ---------------- timecyc (works with any timecyc mod) ----------------
 // Every timecyc mod, 24h or not, ends up filling the game's current colour set each frame; we read that.
+static bool readColour16(int off, int &r, int &g, int &b)
+{
+	const uint16_t *p = (const uint16_t*)(ADDR_CurrentColours + off);
+	if(p[0] > 255 || p[1] > 255 || p[2] > 255) return false;   // not a colour
+	r = p[0]; g = p[1]; b = p[2];
+	return true;
+}
 static bool readTimecycColour(int &r, int &g, int &b)
 {
-	int off = cfg.colorOffset >= 0 ? cfg.colorOffset : DEFAULT_COLOUR_OFFSET;
-	const uint16_t *p = (const uint16_t*)(ADDR_CurrentColours + off);
-	uint16_t v[3] = { p[0], p[1], p[2] };
-	if(v[0] > 255 || v[1] > 255 || v[2] > 255) return false;   // not a colour -> offset is wrong
-	r = v[0]; g = v[1]; b = v[2];
-	return true;
+	return readColour16(cfg.colorOffset >= 0 ? cfg.colorOffset : DEFAULT_COLOUR_OFFSET, r, g, b);
 }
 
 static void dumpColourSet(const char *tag)
@@ -223,6 +287,8 @@ static void dumpColourSet(const char *tag)
 }
 
 // ---------------- per frame ----------------
+struct Visible { int idx; RwV3d sp; float sx, sy; float hil; float sdx, sdy; };
+
 void Clouds_Draw(void)
 {
 	if(!cfg.enable || gFailed) return;
@@ -233,8 +299,9 @@ void Clouds_Draw(void)
 		gInitDone = true;
 		if(!initTextures()){ gFailed = true; return; }
 		QueryPerformanceCounter(&gLastTime);
+		buildLayout();
 		int r, g, b;
-		LOG("fluffy clouds started. colour read: %s", readTimecycColour(r, g, b) ? "ok" : "FAILED (using fallback)");
+		LOG("fluffy clouds started (%d sprites). colour read: %s", gNumClouds, readTimecycColour(r, g, b) ? "ok" : "FAILED (using fallback)");
 		dumpColourSet("first frame");
 	}
 
@@ -248,7 +315,7 @@ void Clouds_Draw(void)
 	if(dtms < 0.0f) dtms = 0.0f; if(dtms > 100.0f) dtms = 100.0f;
 	float timeStep = dtms / 20.0f;
 	float timeStepFix = timeStep / (50.0f / 30.0f);
-	float wind = cfg.windSpeed / 100.0f;
+	float wind = (cfg.windSpeed > 0 ? cfg.windSpeed : 0) / 100.0f;
 
 	RwFrame *frame = (RwFrame*)cam->object.object.parent;
 	if(!frame) return;
@@ -256,31 +323,33 @@ void Clouds_Draw(void)
 	RwV3d campos = m->pos;
 	float heading = atan2f(-m->at.x, m->at.y);
 
-	// original CClouds::Update
-	gCloudRotation += wind * sinf(heading - 0.85f) * 0.001f * timeStepFix;
+	// original CClouds::Update (layer 2 drifts slower)
+	float drift = wind * sinf(heading - 0.85f) * 0.001f * timeStepFix;
+	gCloudRotation  += drift;
+	gCloudRotation2 += drift * (cfg.layer2Speed / 100.0f);
 	gIndividualRotation += (uint32_t)((wind * timeStep * 0.5f + 0.3f * timeStepFix) * 60.0f);
 
-	// alpha: configured alpha, faded by fog weather; optionally by camera height
 	float fog = *(float*)ADDR_Foggyness;
 	if(!(fog >= 0.0f && fog <= 1.0f)) fog = 0.0f;
 
-	// time of day, from the live timecyc (brightness of the sky-bottom colour): 0 = night, 1 = day.
-	// Also the sun colour (sun core). Both come from the same colour set, so any timecyc mod works.
+	// time of day + sun colour + horizon colour, all from the live timecyc
 	float day = 1.0f; int sunR = 255, sunG = 190, sunB = 130;
+	int skyR = 150, skyG = 180, skyB = 220;
 	{
-		const uint16_t *sb = (const uint16_t*)(ADDR_CurrentColours + 0x2A);   // sky bottom RGB (verified by the dump)
-		const uint16_t *sc = (const uint16_t*)(ADDR_CurrentColours + 0x30);   // sun core RGB   (verified by the dump)
-		if(sb[0] <= 255 && sb[1] <= 255 && sb[2] <= 255){
-			float luma = 0.30f * sb[0] + 0.59f * sb[1] + 0.11f * sb[2];
-			day = clamp01((luma - 35.0f) / 95.0f);
-			day = day * day * (3.0f - 2.0f * day);
+		int r, g, b;
+		if(readColour16(OFF_SKY_BOTTOM, r, g, b)){
+			skyR = r; skyG = g; skyB = b;
+			float luma = 0.30f * r + 0.59f * g + 0.11f * b;
+			day = smooth01((luma - 35.0f) / 95.0f);
 		}
-		if(sc[0] <= 255 && sc[1] <= 255 && sc[2] <= 255){
-			int mx = sc[0] > sc[1] ? sc[0] : sc[1]; if(sc[2] > mx) mx = sc[2];
-			if(mx > 40){ sunR = sc[0] * 255 / mx; sunG = sc[1] * 255 / mx; sunB = sc[2] * 255 / mx; }
+		if(readColour16(OFF_SUN_CORE, r, g, b)){
+			int mx = r > g ? r : g; if(b > mx) mx = b;
+			if(mx > 40){ sunR = r * 255 / mx; sunG = g * 255 / mx; sunB = b * 255 / mx; }
 		}
 		sunR += (255 - sunR) / 4; sunG += (255 - sunG) / 4; sunB += (255 - sunB) / 4;   // a bit of white in the glow
 	}
+
+	// alpha: day/night blend, fog, optional fade with camera height
 	int fluffyalpha = (int)((cfg.nightAlpha + (cfg.alpha - cfg.nightAlpha) * day) * (1.0f - fog));
 	float baseZ = (float)cfg.height;
 	if(cfg.fadeAtHeight && campos.z > baseZ)
@@ -288,17 +357,15 @@ void Clouds_Draw(void)
 	if(fluffyalpha <= 0) return;
 	if(fluffyalpha > 255) fluffyalpha = 255;
 
-	// base colour from the CURRENT timecyc
+	// base cloud colour from the CURRENT timecyc
 	int br, bg, bb;
 	if(!readTimecycColour(br, bg, bb)){ br = cfg.fallbackR; bg = cfg.fallbackG; bb = cfg.fallbackB; }
 	int rawR = br, rawG = bg, rawB = bb;
 	br = br * cfg.brightness / 100; bg = bg * cfg.brightness / 100; bb = bb * cfg.brightness / 100;
 	if(br > 255) br = 255; if(bg > 255) bg = 255; if(bb > 255) bb = 255;
-	int wh = (int)(cfg.whiten * day);          // pull towards white in daylight only (clouds must not glow white at night)
+	int wh = (int)(cfg.whiten * day);          // pull towards white in daylight only
 	if(wh > 0){
-		br += (255 - br) * wh / 100;
-		bg += (255 - bg) * wh / 100;
-		bb += (255 - bb) * wh / 100;
+		br += (255 - br) * wh / 100; bg += (255 - bg) * wh / 100; bb += (255 - bb) * wh / 100;
 	}
 	{	// night: darker, with a cool moonlit blue-grey tint
 		float n = 1.0f - day;
@@ -308,16 +375,15 @@ void Clouds_Draw(void)
 		bg = (int)((bg * dim) * (1.0f - tint) + 85.0f * tint);
 		bb = (int)((bb * dim) * (1.0f - tint) + 120.0f * tint);
 	}
-	// log what the timecyc really gives us every 5 s (max 60 lines) - shows how it changes with time of day
 	if(cfg.log){
 		static DWORD lastLog; static int nLog;
 		DWORD t = GetTickCount();
 		if(nLog < 60 && t - lastLog > 5000){
 			lastLog = t; nLog++;
-			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, day %.2f, sun %d %d %d, fog %.2f, alpha %d", rawR, rawG, rawB, br, bg, bb, day, sunR, sunG, sunB, fog, fluffyalpha);
+			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, day %.2f, sun %d %d %d, sky %d %d %d, fog %.2f, alpha %d",
+				rawR, rawG, rawB, br, bg, bb, day, sunR, sunG, sunB, skyR, skyG, skyB, fog, fluffyalpha);
 		}
 	}
-	int tr = (int)(br * 0.85f), tg = (int)(bg * 0.85f), tb = (int)(bb * 0.85f);
 
 	gScrW = (float)cam->frameBuffer->width;
 	gScrH = (float)cam->frameBuffer->height;
@@ -343,66 +409,110 @@ void Clouds_Draw(void)
 	rsSet(RS_VERTEXALPHA, (void*)TRUE);
 	rsSet(RS_TEXFILTER, (void*)2);           // linear
 
-	float rotSin = sinf(gCloudRotation), rotCos = cosf(gCloudRotation);
-	float dist = cfg.distance / 100.0f;                  // ring distance multiplier; sprites grow with it so they keep their apparent size
-	float sizeMul = 55.0f * cfg.size / 100.0f * dist;
+	float rotSin1 = sinf(gCloudRotation),  rotCos1 = cosf(gCloudRotation);
+	float rotSin2 = sinf(gCloudRotation2), rotCos2 = cosf(gCloudRotation2);
+	float dist = cfg.distance / 100.0f;
+	float dist2 = dist * cfg.layer2Distance / 100.0f;
 	float sunX = *(float*)ADDR_SunScreenX, sunY = *(float*)ADDR_SunScreenY;
 	bool sunOk = cfg.highlight && sunX > -20000.0f && sunX < 20000.0f && sunY > -20000.0f && sunY < 20000.0f;
 	float indRot = (uint16_t)gIndividualRotation / 65336.0f * 6.28f;
+	float shading = cfg.shading / 100.0f;
+	float hfade = cfg.horizonFade / 100.0f;
+	float glow = cfg.sunGlow / 100.0f;
+	const float sunC[3] = { (float)sunR, (float)sunG, (float)sunB };
 	CalcScreenFn calc = (CalcScreenFn)ADDR_CalcScreenCoors;
 
-	struct OnScreen { bool on; RwV3d sp; float sx, sy; } cl[NUM_CLOUDS];
-	float hilight = 0.0f;
+	// ----- project every cloud -----
+	static Visible vis[MAX_SPRITES];
+	int nVis = 0;
+	float distLimit = (3.0f * gScrW) / 4.0f;
+	for(int i = 0; i < gNumClouds; i++){
+		const CloudDef &c = gClouds[i];
+		float dm = c.layer ? dist2 : dist;
+		float rs = c.layer ? rotSin2 : rotSin1, rc = c.layer ? rotCos2 : rotCos1;
+		float px = c.ox * dm, py = c.oy * dm;
+		RwV3d wp;
+		wp.x = px * rc + py * rs + campos.x;
+		wp.y = px * rs - py * rc + campos.y;
+		wp.z = c.oz + baseZ + (c.layer ? (float)cfg.layer2Height : 0.0f);
+		float szx, szy; RwV3d sp;
+		if(!calc(wp, &sp, &szx, &szy, false, false)) continue;
+
+		Visible &v = vis[nVis++];
+		v.idx = i; v.sp = sp; v.sx = szx; v.sy = szy; v.hil = 0.0f; v.sdx = 0.0f; v.sdy = -1.0f;
+		if(sunOk){
+			float dx = sunX - sp.x, dy = sunY - sp.y;
+			float sd = sqrtf(dx*dx + dy*dy);
+			if(sd > 1.0f){ v.sdx = dx / sd; v.sdy = dy / sd; }
+			float nearSun = sd < distLimit ? (1.0f - sd / distLimit) : 0.0f;
+			v.hil = clamp01((1.0f - fog) * nearSun * day * glow);
+		}
+	}
+
+	// back-to-front (far first) so the soft alpha blends correctly
+	for(int a = 1; a < nVis; a++){
+		Visible t = vis[a]; int b = a - 1;
+		while(b >= 0 && vis[b].sp.z < t.sp.z){ vis[b + 1] = vis[b]; b--; }
+		vis[b + 1] = t;
+	}
 
 	// ----- pass 1: cloud bodies -----
 	rsSet(RS_SRCBLEND, (void*)BL_SRCALPHA);
 	rsSet(RS_DESTBLEND, (void*)BL_INVSRCALPHA);
 	rsSet(RS_TEXTURERASTER, gTexMask->raster);
 	gNumSprites = 0;
-	for(int i = 0; i < NUM_CLOUDS; i++){
-		RwV3d pos = { 2.0f * CoorsOffsetX[i] * dist, 2.0f * CoorsOffsetY[i] * dist, 40.0f * CoorsOffsetZ[i] + baseZ };
-		RwV3d wp;
-		wp.x = pos.x * rotCos + pos.y * rotSin + campos.x;
-		wp.y = pos.x * rotSin - pos.y * rotCos + campos.y;
-		wp.z = pos.z;
-		float szx, szy; RwV3d sp;
-		if(calc(wp, &sp, &szx, &szy, false, false)){
-			int r1 = tr, g1 = tg, b1 = tb, r2 = br, g2 = bg, b2 = bb;
-			hilight = 0.0f;
-			if(sunOk){
-				float dx = sp.x - sunX, dy = sp.y - sunY;
-				float sundist = sqrtf(dx*dx + dy*dy);
-				float distLimit = (3.0f * gScrW) / 4.0f;
-				if(sundist < distLimit){
-					hilight = (1.0f - fog) * (1.0f - sundist / distLimit) * day * (cfg.sunGlow / 100.0f);
-					if(hilight > 1.0f) hilight = 1.0f;
-					r1 = (int)(tr*(1.0f-hilight) + sunR*hilight); g1 = (int)(tg*(1.0f-hilight) + sunG*hilight); b1 = (int)(tb*(1.0f-hilight) + sunB*hilight);
-					r2 = (int)(br*(1.0f-hilight) + sunR*hilight); g2 = (int)(bg*(1.0f-hilight) + sunG*hilight); b2 = (int)(bb*(1.0f-hilight) + sunB*hilight);
-				}
-			}
-			addSprite2Colours(sp.x, sp.y, sp.z, szx * sizeMul, szy * sizeMul,
-				r1, g1, b1, r2, g2, b2, 0.0f, -1.0f, 1.0f / sp.z, indRot, fluffyalpha);
-			cl[i].on = true; cl[i].sp = sp; cl[i].sx = szx; cl[i].sy = szy;
-		}else
-			cl[i].on = false;
+	for(int n = 0; n < nVis; n++){
+		const Visible &v = vis[n];
+		const CloudDef &c = gClouds[v.idx];
+		float dm = c.layer ? dist2 : dist;
+
+		// horizon fade: low elevation -> fainter and blended into the horizon (sky bottom) colour
+		float px = c.ox * dm, py = c.oy * dm;
+		float hd = sqrtf(px*px + py*py);
+		float dz = (c.oz + baseZ + (c.layer ? (float)cfg.layer2Height : 0.0f)) - campos.z;
+		float len = sqrtf(hd*hd + dz*dz);
+		float sinE = len > 0.001f ? dz / len : 1.0f;
+		float t = smooth01((sinE - 0.03f) / 0.27f);          // 0 at/below the horizon, 1 well above it
+		float fadeA = 1.0f - hfade * (1.0f - t);
+		float mixSky = hfade * (1.0f - t) * 0.65f * day;
+
+		float base[3] = { (float)br, (float)bg, (float)bb };
+		if(c.layer){ base[0] += (255.0f - base[0]) * 0.15f; base[1] += (255.0f - base[1]) * 0.15f; base[2] += (255.0f - base[2]) * 0.15f; }
+		base[0] = lerpf(base[0], (float)skyR, mixSky);
+		base[1] = lerpf(base[1], (float)skyG, mixSky);
+		base[2] = lerpf(base[2], (float)skyB, mixSky);
+
+		float a = fluffyalpha * c.alpha * fadeA * (c.layer ? cfg.layer2Alpha / 100.0f : 1.0f) * (c.layer ? 1.0f : 1.0f);
+		// a little directional light on every cloud in daylight, more near the sun
+		float sun = sunOk ? (v.hil > 0.30f * day * (1.0f - fog) ? v.hil : 0.30f * day * (1.0f - fog)) : 0.0f;
+		float sz = 55.0f * cfg.size / 100.0f * dm * c.size;
+		addLitSprite(v.sp.x, v.sp.y, v.sp.z, v.sx * sz, v.sy * sz, indRot + c.rot, 1.0f / v.sp.z,
+			base, v.sdx, v.sdy, sun, sunC, shading, (int)a);
 	}
 	flushSprites();
 
-	// ----- pass 2: additive sun highlight (same quirk as the original: uses the last cloud's hilight value) -----
-	if(sunOk && hilight > 0.0f){
-		rsSet(RS_SRCBLEND, (void*)BL_ONE);
-		rsSet(RS_DESTBLEND, (void*)BL_ONE);
-		rsSet(RS_TEXTURERASTER, gTexHilite->raster);
-		float ang = atan2f(0.0f, 1.0f);
-		for(int i = 0; i < NUM_CLOUDS; i++){
-			if(!cl[i].on) continue;
-			float dx = cl[i].sp.x - sunX, dy = cl[i].sp.y - sunY;
-			ang = atan2f(dx, dy); if(ang < 0.0f) ang += 6.2831853f;     // angle from +Y, like CGeneral::GetATanOfXY
-			addSpriteHighlight(cl[i].sp.x, cl[i].sp.y, cl[i].sp.z, cl[i].sx * 30.0f * cfg.size / 100.0f * dist,
-				cl[i].sy * 30.0f * cfg.size / 100.0f * dist, (int)(sunR * 0.8f * hilight), (int)(sunG * 0.8f * hilight), (int)(sunB * 0.8f * hilight),
-				1.0f / cl[i].sp.z, 1.7f - ang);
+	// ----- pass 2: additive sun highlight (per cloud: strongest for clouds near the sun) -----
+	if(sunOk){
+		bool any = false;
+		for(int n = 0; n < nVis; n++) if(vis[n].hil > 0.02f){ any = true; break; }
+		if(any){
+			rsSet(RS_SRCBLEND, (void*)BL_ONE);
+			rsSet(RS_DESTBLEND, (void*)BL_ONE);
+			rsSet(RS_TEXTURERASTER, gTexHilite->raster);
+			for(int n = 0; n < nVis; n++){
+				const Visible &v = vis[n];
+				if(v.hil <= 0.02f) continue;
+				const CloudDef &c = gClouds[v.idx];
+				float dm = c.layer ? dist2 : dist;
+				float dx = v.sp.x - sunX, dy = v.sp.y - sunY;
+				float ang = atan2f(dx, dy); if(ang < 0.0f) ang += 6.2831853f;     // angle from +Y, like CGeneral::GetATanOfXY
+				float sz = 30.0f * cfg.size / 100.0f * dm * c.size;
+				float k = v.hil * 0.8f * (c.layer ? cfg.layer2Alpha / 100.0f : 1.0f);
+				addSpriteHighlight(v.sp.x, v.sp.y, v.sp.z, v.sx * sz, v.sy * sz,
+					(int)(sunR * k), (int)(sunG * k), (int)(sunB * k), 1.0f / v.sp.z, 1.7f - ang);
+			}
+			flushSprites();
 		}
-		flushSprites();
 	}
 
 	// ----- restore -----
@@ -412,22 +522,29 @@ void Clouds_Draw(void)
 	rsSet(RS_TEXFILTER, (void*)(intptr_t)sFilter); rsSet(RS_TEXTURERASTER, sRaster);
 }
 
+static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
 void Clouds_Install(const CloudsConfig *c)
 {
 	cfg = *c;
 	if(!cfg.enable) return;
-	if(cfg.alpha < 0) cfg.alpha = 0; if(cfg.alpha > 255) cfg.alpha = 255;
-	if(cfg.brightness < 0) cfg.brightness = 0; if(cfg.brightness > 300) cfg.brightness = 300;
-	if(cfg.nightAlpha < 0) cfg.nightAlpha = 0; if(cfg.nightAlpha > 255) cfg.nightAlpha = 255;
-	if(cfg.nightBrightness < 0) cfg.nightBrightness = 0; if(cfg.nightBrightness > 300) cfg.nightBrightness = 300;
-	if(cfg.nightTint < 0) cfg.nightTint = 0; if(cfg.nightTint > 100) cfg.nightTint = 100;
-	if(cfg.sunGlow < 0) cfg.sunGlow = 0; if(cfg.sunGlow > 300) cfg.sunGlow = 300;
-	if(cfg.whiten < 0) cfg.whiten = 0; if(cfg.whiten > 100) cfg.whiten = 100;
-	if(cfg.distance < 50) cfg.distance = 50; if(cfg.distance > 1500) cfg.distance = 1500;
-	if(cfg.size < 10) cfg.size = 10; if(cfg.size > 400) cfg.size = 400;
-	if(cfg.windSpeed < 0) cfg.windSpeed = 0; if(cfg.windSpeed > 500) cfg.windSpeed = 500;
+	cfg.alpha = clampi(cfg.alpha, 0, 255);
+	cfg.nightAlpha = clampi(cfg.nightAlpha, 0, 255);
+	cfg.nightBrightness = clampi(cfg.nightBrightness, 0, 300);
+	cfg.nightTint = clampi(cfg.nightTint, 0, 100);
+	cfg.sunGlow = clampi(cfg.sunGlow, 0, 300);
+	cfg.brightness = clampi(cfg.brightness, 0, 300);
+	cfg.whiten = clampi(cfg.whiten, 0, 100);
+	cfg.size = clampi(cfg.size, 10, 400);
+	cfg.distance = clampi(cfg.distance, 50, 1500);
+	cfg.shading = clampi(cfg.shading, 0, 100);
+	cfg.horizonFade = clampi(cfg.horizonFade, 0, 100);
+	cfg.variety = clampi(cfg.variety, 0, 100);
+	cfg.layer2Count = clampi(cfg.layer2Count, 0, MAX_L2);
+	cfg.layer2Alpha = clampi(cfg.layer2Alpha, 0, 200);
+	cfg.layer2Distance = clampi(cfg.layer2Distance, 50, 400);
+	cfg.layer2Speed = clampi(cfg.layer2Speed, 0, 300);
+	cfg.windSpeed = clampi(cfg.windSpeed, -1, 500);
 	if(cfg.log) remove("dualpass_clouds.log");
-	// For the record: what sits at the original mod's hook site on this install (not used any more)
-	LOG("clouds are drawn from DualPass' colour-filter hook. bytes at 0x7178F0: %02X %02X %02X %02X %02X",
-		*(uint8_t*)0x7178F0, *(uint8_t*)0x7178F1, *(uint8_t*)0x7178F2, *(uint8_t*)0x7178F3, *(uint8_t*)0x7178F4);
+	LOG("clouds are drawn from DualPass' colour-filter hook");
 }
