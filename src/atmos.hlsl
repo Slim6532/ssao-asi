@@ -33,11 +33,23 @@ VSOut VSMain(float2 p : POSITION)
 float3 S(float2 uv) { return tex2Dlod(sScene, float4(uv, 0, 0)).rgb; }
 
 // ---------------- bloom ----------------
+// One tap of the bright-pass: the sky (depth 1) is masked out, so the bright sky never blooms over the scenery.
+float3 BT(float2 uv)
+{
+	float3 c = S(uv);
+	if (gFlag.w > 0.5)
+	{
+		float d = tex2Dlod(sDepth, float4(uv, 0, 0)).r;
+		c *= (d < 0.99999) ? 1.0 : 0.0;
+	}
+	return c;
+}
+
 float4 PSBright(float2 uv : TEXCOORD0) : COLOR
 {
 	float2 p = gPx.xy;
-	float3 c = S(uv + p * float2(-1, -1)) + S(uv + p * float2(1, -1))
-	         + S(uv + p * float2(-1,  1)) + S(uv + p * float2(1,  1));
+	float3 c = BT(uv + p * float2(-1, -1)) + BT(uv + p * float2(1, -1))
+	         + BT(uv + p * float2(-1,  1)) + BT(uv + p * float2(1,  1));
 	c *= 0.25;
 	float l = dot(c, float3(0.299, 0.587, 0.114));
 	float w = saturate((l - gBloom.y) / max(gBloom.z, 0.001));
@@ -115,7 +127,10 @@ float4 PSAtmos(float2 uv : TEXCOORD0) : COLOR
 	}
 
 	if (gFlag.y > 0.5)
-		col += tex2Dlod(sBloom, float4(uv, 0, 0)).rgb * gBloom.x;
+	{
+		float3 b = saturate(tex2Dlod(sBloom, float4(uv, 0, 0)).rgb * gBloom.x);
+		col = 1.0 - (1.0 - saturate(col)) * (1.0 - b);        // screen blend: brightens, never clips to flat white
+	}
 
 	return float4(col, 1);
 }

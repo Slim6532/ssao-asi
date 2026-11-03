@@ -16,6 +16,7 @@ struct AtmosConfig {
 	// --- bloom ---
 	int bloom;
 	int bloomIntensity;      // percent
+	int bloomDay;            // percent of the intensity that is used in full daylight (night = 100% + night boost)
 	int bloomThresholdDay;   // 0-100: how bright a pixel has to be to glow, in daylight
 	int bloomThresholdNight; // same at night (lower = lit windows and lamps glow)
 	int bloomNightBoost;     // percent extra intensity at night

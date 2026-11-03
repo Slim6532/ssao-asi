@@ -167,15 +167,16 @@ readConfig(HINSTANCE hInst)
 	cfg.atmosCfg.enable              = readInt("Atmosphere", "atmosphere", 0, path);
 	cfg.atmosCfg.toggleKey           = readInt("Atmosphere", "toggleKey", 122, path);     // 122 = F11
 	cfg.atmosCfg.fog                 = readInt("Atmosphere", "fog", 1, path);
-	cfg.atmosCfg.fogStrength         = readInt("Atmosphere", "fogStrength", 70, path);
-	cfg.atmosCfg.fogStart            = readInt("Atmosphere", "fogStart", 60, path);
+	cfg.atmosCfg.fogStrength         = readInt("Atmosphere", "fogStrength", 50, path);
+	cfg.atmosCfg.fogStart            = readInt("Atmosphere", "fogStart", 90, path);
 	cfg.atmosCfg.fogEnd              = readInt("Atmosphere", "fogEnd", 100, path);
-	cfg.atmosCfg.fogCurve            = readInt("Atmosphere", "fogCurve", 180, path);
-	cfg.atmosCfg.sunScatter          = readInt("Atmosphere", "sunScatter", 60, path);
+	cfg.atmosCfg.fogCurve            = readInt("Atmosphere", "fogCurve", 220, path);
+	cfg.atmosCfg.sunScatter          = readInt("Atmosphere", "sunScatter", 25, path);
 	cfg.atmosCfg.bloom               = readInt("Atmosphere", "bloom", 1, path);
-	cfg.atmosCfg.bloomIntensity      = readInt("Atmosphere", "bloomIntensity", 60, path);
-	cfg.atmosCfg.bloomThresholdDay   = readInt("Atmosphere", "bloomThresholdDay", 80, path);
-	cfg.atmosCfg.bloomThresholdNight = readInt("Atmosphere", "bloomThresholdNight", 45, path);
+	cfg.atmosCfg.bloomIntensity      = readInt("Atmosphere", "bloomIntensity", 35, path);
+	cfg.atmosCfg.bloomDay            = readInt("Atmosphere", "bloomDay", 40, path);
+	cfg.atmosCfg.bloomThresholdDay   = readInt("Atmosphere", "bloomThresholdDay", 90, path);
+	cfg.atmosCfg.bloomThresholdNight = readInt("Atmosphere", "bloomThresholdNight", 50, path);
 	cfg.atmosCfg.bloomNightBoost     = readInt("Atmosphere", "bloomNightBoost", 80, path);
 	cfg.atmosCfg.bloomSize           = readInt("Atmosphere", "bloomSize", 100, path);
 	cfg.atmosCfg.haze                = readInt("Atmosphere", "heatHaze", 1, path);
@@ -192,6 +193,7 @@ readConfig(HINSTANCE hInst)
 		if(a.fogCurve < 50) a.fogCurve = 50; if(a.fogCurve > 400) a.fogCurve = 400;
 		if(a.sunScatter < 0) a.sunScatter = 0; if(a.sunScatter > 200) a.sunScatter = 200;
 		if(a.bloomIntensity < 0) a.bloomIntensity = 0; if(a.bloomIntensity > 300) a.bloomIntensity = 300;
+		if(a.bloomDay < 0) a.bloomDay = 0; if(a.bloomDay > 300) a.bloomDay = 300;
 		if(a.bloomThresholdDay < 0) a.bloomThresholdDay = 0; if(a.bloomThresholdDay > 100) a.bloomThresholdDay = 100;
 		if(a.bloomThresholdNight < 0) a.bloomThresholdNight = 0; if(a.bloomThresholdNight > 100) a.bloomThresholdNight = 100;
 		if(a.bloomNightBoost < 0) a.bloomNightBoost = 0; if(a.bloomNightBoost > 500) a.bloomNightBoost = 500;

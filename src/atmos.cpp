@@ -285,7 +285,7 @@ void Atmos_Apply(float nearZ, float farZ, const AtmosConfig *c)
 	dev->SetVertexDeclaration(gDecl);
 	dev->SetVertexShader(gVS);
 
-	float bloomI = c->bloomIntensity / 100.0f * (1.0f + c->bloomNightBoost / 100.0f * (1.0f - day));
+	float bloomI = c->bloomIntensity / 100.0f * lerpf(c->bloomDay / 100.0f, 1.0f + c->bloomNightBoost / 100.0f, 1.0f - day);
 	float bloomT = lerpf(c->bloomThresholdNight / 100.0f, c->bloomThresholdDay / 100.0f, day);
 
 	if(doBloom){
@@ -298,10 +298,15 @@ void Atmos_Apply(float nearZ, float farZ, const AtmosConfig *c)
 		dev->SetVertexShaderConstantF(8, rtPx, 1);
 		dev->SetPixelShaderConstantF(0, srcPx, 1);
 		dev->SetPixelShaderConstantF(5, bl, 1);
+		float brFlag[4] = { 0, 0, 0, depth ? 1.0f : 0.0f };       // w: the depth texture is available -> mask out the sky
+		dev->SetPixelShaderConstantF(7, brFlag, 1);
 		setSampler(dev, 0, D3DTEXF_LINEAR);
+		setSampler(dev, 1, D3DTEXF_POINT);
 		dev->SetTexture(0, gScene);
+		dev->SetTexture(1, depth);
 		dev->SetPixelShader(gPSBright);
 		drawQuad(dev);
+		dev->SetTexture(1, NULL);
 
 		float sz = c->bloomSize / 100.0f;
 		// blur A -> B (horizontal)
