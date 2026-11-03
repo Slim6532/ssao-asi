@@ -176,6 +176,12 @@ readConfig(HINSTANCE hInst)
 	cfg.cloudsCfg.highlight       = readInt("FluffyClouds", "highlight", 1, path);
 	cfg.cloudsCfg.windSpeed       = readInt("FluffyClouds", "windSpeed", 60, path);
 	cfg.cloudsCfg.fadeAtHeight    = readInt("FluffyClouds", "fadeAtHeight", 0, path);
+	cfg.cloudsCfg.windMode        = readInt("FluffyClouds", "windMode", 1, path);
+	cfg.cloudsCfg.windDirection   = readInt("FluffyClouds", "windDirection", 40, path);
+	cfg.cloudsCfg.parallax        = readInt("FluffyClouds", "parallax", 3, path);
+	cfg.cloudsCfg.lifespan        = readInt("FluffyClouds", "lifespan", 150, path);
+	cfg.cloudsCfg.fadeTime        = readInt("FluffyClouds", "fadeTime", 1500, path);
+	cfg.cloudsCfg.smoothing       = readInt("FluffyClouds", "smoothing", 1000, path);
 	cfg.cloudsCfg.shading         = readInt("FluffyClouds", "shading", 100, path);
 	cfg.cloudsCfg.horizonFade     = readInt("FluffyClouds", "horizonFade", 70, path);
 	cfg.cloudsCfg.variety         = readInt("FluffyClouds", "variety", 60, path);

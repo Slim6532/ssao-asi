@@ -109,17 +109,40 @@ static const float CoorsOffsetZ[37] = {
 #define MAX_SPRITES (NUM_L1 + MAX_L2)
 
 struct CloudDef {
-	float ox, oy, oz;    // offset from the camera before the distance multiplier (oz is height above the layer base)
+	float ox, oy, oz;    // offset in "sky space" before the distance multiplier (oz = height above the layer base)
 	float size;          // size multiplier
 	float alpha;         // alpha multiplier
 	float rot;           // extra rotation (radians)
 	int   layer;         // 0 or 1
+	float age, life;     // seconds: a cloud fades in, lives, fades out, then re-forms somewhere else
 };
 static CloudDef gClouds[MAX_SPRITES];
 static int gNumClouds;
 static uint32_t gRng = 2463534242u;
 static float rnd01(void) { gRng ^= gRng << 13; gRng ^= gRng >> 17; gRng ^= gRng << 5; return (gRng & 0xFFFFFF) / 16777216.0f; }
 static float rndS(void) { return rnd01() * 2.0f - 1.0f; }
+
+// random placement + look inside the cloud field (units before the distance multiplier)
+static void placeCloud(CloudDef &c)
+{
+	float v = cfg.variety / 100.0f;
+	if(c.layer == 0){
+		float ang = rnd01() * 6.2831853f, r = 110.0f + rnd01() * 180.0f;
+		c.ox = cosf(ang) * r; c.oy = sinf(ang) * r;
+		c.oz = rnd01() * 96.0f;
+		c.size  = 1.0f + rndS() * 0.30f * v;
+		c.alpha = 1.0f - rnd01() * 0.30f * v;
+		c.rot   = rndS() * 3.14159f * v;
+	}else{
+		float ang = rnd01() * 6.2831853f, r = 150.0f + rnd01() * 150.0f;
+		c.ox = cosf(ang) * r; c.oy = sinf(ang) * r;
+		c.oz = rnd01() * 70.0f;
+		c.size  = 0.60f + rnd01() * 0.80f;
+		c.alpha = 0.60f + rnd01() * 0.40f;
+		c.rot   = rnd01() * 6.2831853f;
+	}
+}
+static float newLife(void) { return cfg.lifespan * (0.6f + rnd01() * 0.8f); }
 
 static void buildLayout(void)
 {
@@ -140,14 +163,13 @@ static void buildLayout(void)
 	if(cfg.layer2){
 		for(int i = 0; i < cfg.layer2Count && gNumClouds < MAX_SPRITES; i++){
 			CloudDef &c = gClouds[gNumClouds++];
-			float ang = rnd01() * 6.2831853f, r = 150.0f + rnd01() * 150.0f;
-			c.ox = cosf(ang) * r; c.oy = sinf(ang) * r;
-			c.oz = rnd01() * 70.0f;
-			c.size  = 0.60f + rnd01() * 0.80f;
-			c.alpha = 0.60f + rnd01() * 0.40f;
-			c.rot   = rnd01() * 6.2831853f;
 			c.layer = 1;
+			placeCloud(c);
 		}
+	}
+	for(int i = 0; i < gNumClouds; i++){      // clouds start at random points of their life so they don't all change together
+		gClouds[i].life = cfg.lifespan > 0 ? newLife() : 1.0e9f;
+		gClouds[i].age  = cfg.lifespan > 0 ? rnd01() * gClouds[i].life : 0.0f;
 	}
 }
 
@@ -287,7 +309,16 @@ static void dumpColourSet(const char *tag)
 }
 
 // ---------------- per frame ----------------
-struct Visible { int idx; RwV3d sp; float sx, sy; float hil; float sdx, sdy; };
+struct Visible { int idx; RwV3d sp; float sx, sy; float hil; float sdx, sdy; float edge; };
+
+// values that are eased so sudden time / weather / timecyc jumps don't pop
+struct Smoothed { bool init; float day, fog, fl[3], sky[3], sun[3]; };
+static Smoothed gS;
+static float gFade;                       // 0..1, fades the clouds out in interiors
+static float gWindX1, gWindY1, gWindX2, gWindY2;   // accumulated wind drift per layer (world units)
+static RwV3d gCamOrigin; static bool gCamOriginSet;
+
+static float wrapRange(float x, float R) { x = fmodf(x + R, 2.0f * R); if(x < 0.0f) x += 2.0f * R; return x - R; }
 
 void Clouds_Draw(void)
 {
@@ -305,61 +336,93 @@ void Clouds_Draw(void)
 		dumpColourSet("first frame");
 	}
 
-	if(*(int*)ADDR_CurrArea != 0) return;       // CGame::CanSeeOutSideFromCurrArea (interiors)
-
 	// frame time -> the game's timestep units (1.0 = 20 ms), clamped
 	LARGE_INTEGER now, freq;
 	QueryPerformanceCounter(&now); QueryPerformanceFrequency(&freq);
 	float dtms = (float)((now.QuadPart - gLastTime.QuadPart) * 1000.0 / (double)freq.QuadPart);
 	gLastTime = now;
 	if(dtms < 0.0f) dtms = 0.0f; if(dtms > 100.0f) dtms = 100.0f;
+	float dts = dtms / 1000.0f;
 	float timeStep = dtms / 20.0f;
 	float timeStepFix = timeStep / (50.0f / 30.0f);
 	float wind = (cfg.windSpeed > 0 ? cfg.windSpeed : 0) / 100.0f;
+
+	// smooth fade when entering / leaving interiors (CGame::currArea != 0)
+	{
+		float target = (*(int*)ADDR_CurrArea == 0) ? 1.0f : 0.0f;
+		if(cfg.fadeTime > 0){
+			float step = dtms / (float)cfg.fadeTime;
+			float d = target - gFade;
+			gFade += d > step ? step : (d < -step ? -step : d);
+		}else
+			gFade = target;
+	}
+	if(gFade <= 0.002f) return;
 
 	RwFrame *frame = (RwFrame*)cam->object.object.parent;
 	if(!frame) return;
 	const RwMatrix *m = &frame->ltm;
 	RwV3d campos = m->pos;
 	float heading = atan2f(-m->at.x, m->at.y);
+	if(!gCamOriginSet){ gCamOrigin = campos; gCamOriginSet = true; }
 
-	// original CClouds::Update (layer 2 drifts slower)
-	float drift = wind * sinf(heading - 0.85f) * 0.001f * timeStepFix;
-	gCloudRotation  += drift;
-	gCloudRotation2 += drift * (cfg.layer2Speed / 100.0f);
+	// motion
+	if(cfg.windMode == 1){
+		float spd = 4.0f * wind * dts;                       // world units per second at windSpeed 100
+		float ang = cfg.windDirection * 0.0174533f;
+		gWindX1 += cosf(ang) * spd;  gWindY1 += sinf(ang) * spd;
+		float k2 = cfg.layer2Speed / 100.0f;
+		gWindX2 += cosf(ang) * spd * k2;  gWindY2 += sinf(ang) * spd * k2;
+	}else{
+		float drift = wind * sinf(heading - 0.85f) * 0.001f * timeStepFix;       // original CClouds::Update
+		gCloudRotation  += drift;
+		gCloudRotation2 += drift * (cfg.layer2Speed / 100.0f);
+	}
 	gIndividualRotation += (uint32_t)((wind * timeStep * 0.5f + 0.3f * timeStepFix) * 60.0f);
 
-	float fog = *(float*)ADDR_Foggyness;
-	if(!(fog >= 0.0f && fog <= 1.0f)) fog = 0.0f;
-
-	// time of day + sun colour + horizon colour, all from the live timecyc
-	float day = 1.0f; int sunR = 255, sunG = 190, sunB = 130;
-	int skyR = 150, skyG = 180, skyB = 220;
+	// ---- read the live timecyc: time of day, sun, sky, cloud colour, fog -> eased ----
+	float fogT = *(float*)ADDR_Foggyness;
+	if(!(fogT >= 0.0f && fogT <= 1.0f)) fogT = 0.0f;
+	float dayT = 1.0f, sunT[3] = { 255.0f, 190.0f, 130.0f }, skyT[3] = { 150.0f, 180.0f, 220.0f }, flT[3];
 	{
 		int r, g, b;
 		if(readColour16(OFF_SKY_BOTTOM, r, g, b)){
-			skyR = r; skyG = g; skyB = b;
-			float luma = 0.30f * r + 0.59f * g + 0.11f * b;
-			day = smooth01((luma - 35.0f) / 95.0f);
+			skyT[0] = (float)r; skyT[1] = (float)g; skyT[2] = (float)b;
+			dayT = smooth01((0.30f * r + 0.59f * g + 0.11f * b - 35.0f) / 95.0f);
 		}
 		if(readColour16(OFF_SUN_CORE, r, g, b)){
 			int mx = r > g ? r : g; if(b > mx) mx = b;
-			if(mx > 40){ sunR = r * 255 / mx; sunG = g * 255 / mx; sunB = b * 255 / mx; }
+			if(mx > 40){ sunT[0] = (float)(r * 255 / mx); sunT[1] = (float)(g * 255 / mx); sunT[2] = (float)(b * 255 / mx); }
 		}
-		sunR += (255 - sunR) / 4; sunG += (255 - sunG) / 4; sunB += (255 - sunB) / 4;   // a bit of white in the glow
+		for(int k = 0; k < 3; k++) sunT[k] += (255.0f - sunT[k]) * 0.25f;    // a bit of white in the glow
+		if(!readTimecycColour(r, g, b)){ r = cfg.fallbackR; g = cfg.fallbackG; b = cfg.fallbackB; }
+		flT[0] = (float)r; flT[1] = (float)g; flT[2] = (float)b;
 	}
+	{
+		float k = (cfg.smoothing > 0 && gS.init) ? 1.0f - expf(-dtms / (float)cfg.smoothing) : 1.0f;
+		gS.init = true;
+		gS.day += (dayT - gS.day) * k;  gS.fog += (fogT - gS.fog) * k;
+		for(int i = 0; i < 3; i++){
+			gS.fl[i]  += (flT[i]  - gS.fl[i])  * k;
+			gS.sky[i] += (skyT[i] - gS.sky[i]) * k;
+			gS.sun[i] += (sunT[i] - gS.sun[i]) * k;
+		}
+	}
+	float day = gS.day, fog = gS.fog;
+	int sunR = (int)gS.sun[0], sunG = (int)gS.sun[1], sunB = (int)gS.sun[2];
+	int skyR = (int)gS.sky[0], skyG = (int)gS.sky[1], skyB = (int)gS.sky[2];
 
-	// alpha: day/night blend, fog, optional fade with camera height
-	int fluffyalpha = (int)((cfg.nightAlpha + (cfg.alpha - cfg.nightAlpha) * day) * (1.0f - fog));
+	// alpha: day/night blend, fog, interior fade, optional fade with camera height
+	float master = smooth01(gFade);
+	int fluffyalpha = (int)((cfg.nightAlpha + (cfg.alpha - cfg.nightAlpha) * day) * (1.0f - fog) * master);
 	float baseZ = (float)cfg.height;
 	if(cfg.fadeAtHeight && campos.z > baseZ)
 		fluffyalpha -= (int)((campos.z - baseZ) * ((255.0f - (float)cfg.alpha) / 255.0f));
 	if(fluffyalpha <= 0) return;
 	if(fluffyalpha > 255) fluffyalpha = 255;
 
-	// base cloud colour from the CURRENT timecyc
-	int br, bg, bb;
-	if(!readTimecycColour(br, bg, bb)){ br = cfg.fallbackR; bg = cfg.fallbackG; bb = cfg.fallbackB; }
+	// base cloud colour
+	int br = (int)gS.fl[0], bg = (int)gS.fl[1], bb = (int)gS.fl[2];
 	int rawR = br, rawG = bg, rawB = bb;
 	br = br * cfg.brightness / 100; bg = bg * cfg.brightness / 100; bb = bb * cfg.brightness / 100;
 	if(br > 255) br = 255; if(bg > 255) bg = 255; if(bb > 255) bb = 255;
@@ -380,8 +443,8 @@ void Clouds_Draw(void)
 		DWORD t = GetTickCount();
 		if(nLog < 60 && t - lastLog > 5000){
 			lastLog = t; nLog++;
-			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, day %.2f, sun %d %d %d, sky %d %d %d, fog %.2f, alpha %d",
-				rawR, rawG, rawB, br, bg, bb, day, sunR, sunG, sunB, skyR, skyG, skyB, fog, fluffyalpha);
+			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, day %.2f, sun %d %d %d, sky %d %d %d, fog %.2f, alpha %d, fade %.2f",
+				rawR, rawG, rawB, br, bg, bb, day, sunR, sunG, sunB, skyR, skyG, skyB, fog, fluffyalpha, gFade);
 		}
 	}
 
@@ -421,31 +484,68 @@ void Clouds_Draw(void)
 	float glow = cfg.sunGlow / 100.0f;
 	const float sunC[3] = { (float)sunR, (float)sunG, (float)sunB };
 	CalcScreenFn calc = (CalcScreenFn)ADDR_CalcScreenCoors;
+	float par = cfg.parallax / 100.0f;
+	float camOffX = campos.x - gCamOrigin.x, camOffY = campos.y - gCamOrigin.y;
 
-	// ----- project every cloud -----
+	// ----- age the clouds, re-form the ones whose life is over, project the rest -----
 	static Visible vis[MAX_SPRITES];
 	int nVis = 0;
 	float distLimit = (3.0f * gScrW) / 4.0f;
 	for(int i = 0; i < gNumClouds; i++){
-		const CloudDef &c = gClouds[i];
+		CloudDef &c = gClouds[i];
 		float dm = c.layer ? dist2 : dist;
-		float rs = c.layer ? rotSin2 : rotSin1, rc = c.layer ? rotCos2 : rotCos1;
-		float px = c.ox * dm, py = c.oy * dm;
+		float wx = c.layer ? gWindX2 : gWindX1, wy = c.layer ? gWindY2 : gWindY1;
+
+		if(cfg.lifespan > 0){
+			c.age += dts;
+			if(c.age >= c.life){                      // dissolved: form again somewhere else (invisible at this point)
+				placeCloud(c);
+				c.life = newLife(); c.age = 0.0f;
+				if(cfg.windMode == 1){                // keep the new on-screen position independent of the accumulated wind
+					c.ox -= (wx - par * camOffX) / dm;
+					c.oy -= (wy - par * camOffY) / dm;
+				}
+			}
+		}
+		float lf = 1.0f;                              // life fade in / out
+		if(cfg.lifespan > 0){
+			float fadeT = c.life * 0.25f; if(fadeT > 25.0f) fadeT = 25.0f; if(fadeT < 0.5f) fadeT = 0.5f;
+			lf = smooth01(c.age / fadeT) * smooth01((c.life - c.age) / fadeT);
+		}
+
+		float px, py, edge = 1.0f;
 		RwV3d wp;
-		wp.x = px * rc + py * rs + campos.x;
-		wp.y = px * rs - py * rc + campos.y;
+		if(cfg.windMode == 1){
+			// sky space: drift with the wind, tiny parallax with our own movement, wrap around so the sky never empties
+			float R = (c.layer ? 330.0f : 285.0f) * dm;
+			px = wrapRange(c.ox * dm + wx - par * camOffX, R);
+			py = wrapRange(c.oy * dm + wy - par * camOffY, R);
+			float mx = fabsf(px) > fabsf(py) ? fabsf(px) : fabsf(py);
+			edge = smooth01((R - mx) / (0.22f * R));  // fade out near the wrap edge so nothing pops
+			wp.x = px + campos.x;
+			wp.y = py + campos.y;
+		}else{
+			float rs = c.layer ? rotSin2 : rotSin1, rc = c.layer ? rotCos2 : rotCos1;
+			float ox = c.ox * dm, oy = c.oy * dm;
+			px = ox * rc + oy * rs;                   // original: the whole ring rotates around the camera
+			py = ox * rs - oy * rc;
+			wp.x = px + campos.x;
+			wp.y = py + campos.y;
+		}
 		wp.z = c.oz + baseZ + (c.layer ? (float)cfg.layer2Height : 0.0f);
+		float vis01 = lf * edge;
+		if(vis01 <= 0.004f) continue;
 		float szx, szy; RwV3d sp;
 		if(!calc(wp, &sp, &szx, &szy, false, false)) continue;
 
 		Visible &v = vis[nVis++];
-		v.idx = i; v.sp = sp; v.sx = szx; v.sy = szy; v.hil = 0.0f; v.sdx = 0.0f; v.sdy = -1.0f;
+		v.idx = i; v.sp = sp; v.sx = szx; v.sy = szy; v.hil = 0.0f; v.sdx = 0.0f; v.sdy = -1.0f; v.edge = vis01;
 		if(sunOk){
 			float dx = sunX - sp.x, dy = sunY - sp.y;
 			float sd = sqrtf(dx*dx + dy*dy);
 			if(sd > 1.0f){ v.sdx = dx / sd; v.sdy = dy / sd; }
 			float nearSun = sd < distLimit ? (1.0f - sd / distLimit) : 0.0f;
-			v.hil = clamp01((1.0f - fog) * nearSun * day * glow);
+			v.hil = clamp01((1.0f - fog) * nearSun * day * glow * vis01);
 		}
 	}
 
@@ -467,10 +567,19 @@ void Clouds_Draw(void)
 		float dm = c.layer ? dist2 : dist;
 
 		// horizon fade: low elevation -> fainter and blended into the horizon (sky bottom) colour
-		float px = c.ox * dm, py = c.oy * dm;
-		float hd = sqrtf(px*px + py*py);
 		float dz = (c.oz + baseZ + (c.layer ? (float)cfg.layer2Height : 0.0f)) - campos.z;
-		float len = sqrtf(hd*hd + dz*dz);
+		float hd = 0.0f;
+		{
+			float wx = c.layer ? gWindX2 : gWindX1, wy = c.layer ? gWindY2 : gWindY1;
+			float px, py;
+			if(cfg.windMode == 1){
+				float R = (c.layer ? 330.0f : 285.0f) * dm;
+				px = wrapRange(c.ox * dm + wx - par * camOffX, R);
+				py = wrapRange(c.oy * dm + wy - par * camOffY, R);
+			}else{ px = c.ox * dm; py = c.oy * dm; }
+			hd = sqrtf(px * px + py * py);
+		}
+		float len = sqrtf(hd * hd + dz * dz);
 		float sinE = len > 0.001f ? dz / len : 1.0f;
 		float t = smooth01((sinE - 0.03f) / 0.27f);          // 0 at/below the horizon, 1 well above it
 		float fadeA = 1.0f - hfade * (1.0f - t);
@@ -482,9 +591,10 @@ void Clouds_Draw(void)
 		base[1] = lerpf(base[1], (float)skyG, mixSky);
 		base[2] = lerpf(base[2], (float)skyB, mixSky);
 
-		float a = fluffyalpha * c.alpha * fadeA * (c.layer ? cfg.layer2Alpha / 100.0f : 1.0f) * (c.layer ? 1.0f : 1.0f);
+		float a = fluffyalpha * c.alpha * fadeA * v.edge * (c.layer ? cfg.layer2Alpha / 100.0f : 1.0f);
 		// a little directional light on every cloud in daylight, more near the sun
-		float sun = sunOk ? (v.hil > 0.30f * day * (1.0f - fog) ? v.hil : 0.30f * day * (1.0f - fog)) : 0.0f;
+		float sunMin = 0.30f * day * (1.0f - fog);
+		float sun = sunOk ? (v.hil > sunMin ? v.hil : sunMin) : 0.0f;
 		float sz = 55.0f * cfg.size / 100.0f * dm * c.size;
 		addLitSprite(v.sp.x, v.sp.y, v.sp.z, v.sx * sz, v.sy * sz, indRot + c.rot, 1.0f / v.sp.z,
 			base, v.sdx, v.sdy, sun, sunC, shading, (int)a);
@@ -507,7 +617,7 @@ void Clouds_Draw(void)
 				float dx = v.sp.x - sunX, dy = v.sp.y - sunY;
 				float ang = atan2f(dx, dy); if(ang < 0.0f) ang += 6.2831853f;     // angle from +Y, like CGeneral::GetATanOfXY
 				float sz = 30.0f * cfg.size / 100.0f * dm * c.size;
-				float k = v.hil * 0.8f * (c.layer ? cfg.layer2Alpha / 100.0f : 1.0f);
+				float k = v.hil * 0.8f * (c.layer ? cfg.layer2Alpha / 100.0f : 1.0f) * master;
 				addSpriteHighlight(v.sp.x, v.sp.y, v.sp.z, v.sx * sz, v.sy * sz,
 					(int)(sunR * k), (int)(sunG * k), (int)(sunB * k), 1.0f / v.sp.z, 1.7f - ang);
 			}
@@ -545,6 +655,12 @@ void Clouds_Install(const CloudsConfig *c)
 	cfg.layer2Distance = clampi(cfg.layer2Distance, 50, 400);
 	cfg.layer2Speed = clampi(cfg.layer2Speed, 0, 300);
 	cfg.windSpeed = clampi(cfg.windSpeed, -1, 500);
+	cfg.windMode = cfg.windMode ? 1 : 0;
+	cfg.windDirection = clampi(cfg.windDirection, -360, 720);
+	cfg.parallax = clampi(cfg.parallax, 0, 50);
+	cfg.lifespan = clampi(cfg.lifespan, 0, 3600);
+	cfg.fadeTime = clampi(cfg.fadeTime, 0, 10000);
+	cfg.smoothing = clampi(cfg.smoothing, 0, 10000);
 	if(cfg.log) remove("dualpass_clouds.log");
 	LOG("clouds are drawn from DualPass' colour-filter hook");
 }

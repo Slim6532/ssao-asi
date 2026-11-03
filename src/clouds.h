@@ -18,6 +18,13 @@ struct CloudsConfig {
 	int   highlight;       // 1 = sun lighting + additive sun highlight pass
 	int   windSpeed;       // percent, drift speed (original used CWeather::Wind). <0 counts as 0
 	int   fadeAtHeight;    // 1 = fade clouds out when the camera is far above the layer (planes, jetpack)
+	// --- motion / transitions ---
+	int   windMode;        // 1 = clouds drift across the sky in one wind direction (wrap-around), 0 = original (ring rotates around you)
+	int   windDirection;   // degrees, world direction the clouds drift towards (windMode 1)
+	int   parallax;        // percent of YOUR movement that shifts the clouds (0 = painted on the sky, 3-5 = subtle depth)
+	int   lifespan;        // average seconds a cloud lives before it dissolves and re-forms elsewhere. 0 = clouds never change
+	int   fadeTime;        // ms: fade out / in when entering / leaving interiors (0 = instant)
+	int   smoothing;       // ms: eases sudden time-of-day / weather / timecyc changes (0 = instant)
 	// --- lighting / look ---
 	int   shading;         // 0..100: top-lit / dark-underside contrast of each cloud (0 = flat like the original)
 	int   horizonFade;     // 0..100: clouds near the horizon fade out and blend into the sky colour
