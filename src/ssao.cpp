@@ -464,3 +464,8 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	REL(oldRT);
 	REL(oldDS);
 }
+
+IDirect3DTexture9 *SSAO_GetDepthTexture(void)
+{
+	return gFailed ? NULL : gDepthTex;
+}

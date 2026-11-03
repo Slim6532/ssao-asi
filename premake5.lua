@@ -24,7 +24,11 @@ project "dualpass"
 		'fxc /nologo /O3 /T ps_3_0 /E PSBlur /Vn g_psBlur /Fh ..\\src\\ssao_ps_blur.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSComp /Vn g_psComp /Fh ..\\src\\ssao_ps_comp.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsPost /Fh ..\\src\\post_vs.h ..\\src\\post.hlsl',
-		'fxc /nologo /O3 /T ps_3_0 /E PSPost /Vn g_psPost /Fh ..\\src\\post_ps.h ..\\src\\post.hlsl'
+		'fxc /nologo /O3 /T ps_3_0 /E PSPost /Vn g_psPost /Fh ..\\src\\post_ps.h ..\\src\\post.hlsl',
+		'fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsAtmos /Fh ..\\src\\atmos_vs.h ..\\src\\atmos.hlsl',
+		'fxc /nologo /O3 /T ps_3_0 /E PSBright /Vn g_psBloomBright /Fh ..\\src\\atmos_ps_bright.h ..\\src\\atmos.hlsl',
+		'fxc /nologo /O3 /T ps_3_0 /E PSBlur /Vn g_psBloomBlur /Fh ..\\src\\atmos_ps_blur.h ..\\src\\atmos.hlsl',
+		'fxc /nologo /O3 /T ps_3_0 /E PSAtmos /Vn g_psAtmos /Fh ..\\src\\atmos_ps_final.h ..\\src\\atmos.hlsl'
 	}
 
 	filter "configurations:Release"
