@@ -275,6 +275,30 @@ static int instanceImpl(void *object, DPResEntryHeader *h, int reinstance)
 	RpMorphTarget *mt = geo->morphTarget;
 	bool prelit = (geo->flags & rpGEOMETRYPRELIT) != 0;
 	bool normals = (geo->flags & rpGEOMETRYNORMALS) != 0;
+	// ---- diagnostics: the first calls dump the raw geometry so a wrong struct layout is visible ----
+	{
+		static int dumped;
+		bool bad = !geo || IsBadReadPtr(geo, 100) || !mt || IsBadReadPtr(mt, 32) || !mt->verts ||
+		           IsBadReadPtr(mt->verts, geo->numVertices*12 > 0 ? geo->numVertices*12 : 12);
+		if(dumped < 4 || bad){
+			if(dumped < 12){
+				dumped++;
+				plog("instance #%d: atomic %p geo %p numVerts %d flags %08X morphTarget %p prelit %p tex0 %p pipeID %08X",
+				     dumped, atomic, geo, geo ? geo->numVertices : -1, geo ? (unsigned)geo->flags : 0, mt,
+				     geo ? geo->preLitLum : NULL, geo ? geo->texCoords[0] : NULL, atomicPipeID(atomic));
+				if(geo && !IsBadReadPtr(geo, 100)){
+					const unsigned *g = (const unsigned*)geo;
+					plog("  geometry dwords: %08X %08X %08X %08X | %08X %08X %08X %08X | %08X %08X %08X %08X | %08X %08X %08X %08X | %08X %08X %08X %08X | %08X %08X %08X %08X | %08X",
+					     g[0],g[1],g[2],g[3],g[4],g[5],g[6],g[7],g[8],g[9],g[10],g[11],g[12],g[13],g[14],g[15],g[16],g[17],g[18],g[19],g[20],g[21],g[22],g[23],g[24]);
+				}
+				if(mt && !IsBadReadPtr(mt, 32)){
+					const unsigned *m = (const unsigned*)mt;
+					plog("  morph target dwords: %08X %08X %08X %08X %08X %08X %08X %08X  (expect parentGeom, sphere x4, verts, normals)", m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7]);
+				}
+			}
+		}
+		if(bad){ plog("  -> vertex data pointer invalid, skipping this geometry (pipe stays enabled)"); return 0; }
+	}
 	RwRGBA *day = dayColours(geo), *night = NULL;
 	if(atomicPipeID(atomic) == ID_BUILDING_DN){
 		night = extraColours(geo);
