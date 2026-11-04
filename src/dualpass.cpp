@@ -167,11 +167,12 @@ readConfig(HINSTANCE hInst)
 	cfg.atmosCfg.enable              = readInt("Atmosphere", "atmosphere", 0, path);
 	cfg.atmosCfg.toggleKey           = readInt("Atmosphere", "toggleKey", 122, path);     // 122 = F11
 	cfg.atmosCfg.fog                 = readInt("Atmosphere", "fog", 1, path);
-	cfg.atmosCfg.fogStrength         = readInt("Atmosphere", "fogStrength", 50, path);
-	cfg.atmosCfg.fogStart            = readInt("Atmosphere", "fogStart", 90, path);
+	cfg.atmosCfg.fogStrength         = readInt("Atmosphere", "fogStrength", 30, path);
+	cfg.atmosCfg.fogDesaturate        = readInt("Atmosphere", "fogDesaturate", 55, path);
+	cfg.atmosCfg.fogStart            = readInt("Atmosphere", "fogStart", 150, path);
 	cfg.atmosCfg.fogEnd              = readInt("Atmosphere", "fogEnd", 100, path);
-	cfg.atmosCfg.fogCurve            = readInt("Atmosphere", "fogCurve", 220, path);
-	cfg.atmosCfg.sunScatter          = readInt("Atmosphere", "sunScatter", 25, path);
+	cfg.atmosCfg.fogCurve            = readInt("Atmosphere", "fogCurve", 250, path);
+	cfg.atmosCfg.sunScatter          = readInt("Atmosphere", "sunScatter", 10, path);
 	cfg.atmosCfg.bloom               = readInt("Atmosphere", "bloom", 1, path);
 	cfg.atmosCfg.bloomIntensity      = readInt("Atmosphere", "bloomIntensity", 35, path);
 	cfg.atmosCfg.bloomDay            = readInt("Atmosphere", "bloomDay", 40, path);
@@ -183,6 +184,7 @@ readConfig(HINSTANCE hInst)
 	{
 		AtmosConfig &a = cfg.atmosCfg;
 		if(a.fogStrength < 0) a.fogStrength = 0; if(a.fogStrength > 100) a.fogStrength = 100;
+		if(a.fogDesaturate < 0) a.fogDesaturate = 0; if(a.fogDesaturate > 100) a.fogDesaturate = 100;
 		if(a.fogStart < 5) a.fogStart = 5; if(a.fogStart > 300) a.fogStart = 300;
 		if(a.fogEnd < 20) a.fogEnd = 20; if(a.fogEnd > 300) a.fogEnd = 300;
 		if(a.fogCurve < 50) a.fogCurve = 50; if(a.fogCurve > 400) a.fogCurve = 400;

@@ -9,6 +9,7 @@ struct AtmosConfig {
 	// --- fog (depth based, colour from the live timecyc sky colour) ---
 	int fog;
 	int fogStrength;         // percent of the maximum haze (0-100)
+	int fogDesaturate;       // percent: how much colour is taken out of the fog (0 = pure sky colour, 100 = neutral grey-white)
 	int fogStart;            // percent of the timecyc fog start distance
 	int fogEnd;              // percent of the timecyc far clip: where the haze is at full strength
 	int fogCurve;            // x100: 100 = linear, 150-250 = the haze gathers in the distance

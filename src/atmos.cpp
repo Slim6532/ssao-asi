@@ -328,7 +328,13 @@ void Atmos_Apply(float nearZ, float farZ, const AtmosConfig *c)
 	dev->SetRenderTarget(0, rt);
 	float rtPx[4] = { 1.0f / (float)gW, 1.0f / (float)gH, 0, 0 };
 	float px[4]   = { 1.0f / (float)gW, 1.0f / (float)gH, nearZ, farZ };
-	float fogC[4] = { sr / 255.0f, sg / 255.0f, sb / 255.0f, doFog ? c->fogStrength / 100.0f : 0.0f };
+	// fog colour: the timecyc sky colour with part of its colour taken out, so a strongly coloured sky
+	// (green smog, orange sunset) doesn't wash the whole distance in that colour. Distant scenery then fades
+	// like natural aerial perspective instead of a coloured veil.
+	float skyLuma = (0.30f * sr + 0.59f * sg + 0.11f * sb) / 255.0f;
+	float desat = c->fogDesaturate / 100.0f;
+	float fogC[4] = { lerpf(sr / 255.0f, skyLuma, desat), lerpf(sg / 255.0f, skyLuma, desat), lerpf(sb / 255.0f, skyLuma, desat),
+		doFog ? c->fogStrength / 100.0f : 0.0f };
 	float fogP[4] = { fogStart, fogEnd, c->fogCurve / 100.0f, c->sunScatter / 100.0f * day };
 	float sun[4]  = { sunU, sunV, (doFog && sunOk) ? 1.0f : 0.0f, (float)gW / (float)gH };
 	float sunC[4] = { ur / 255.0f, ug / 255.0f, ub / 255.0f, 0 };
