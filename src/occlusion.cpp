@@ -27,6 +27,8 @@ static bool gHaveCam;
 static void *gVS, *gPS, *gDecl;
 static unsigned gStatSkipped, gStatTested, gStatHidden;
 static FILE *gLog;
+static int gBadFrames;          // consecutive frames with an implausible number of hidden objects
+static bool gBroken;            // culling shut itself off
 
 static const float kCube[8][3] = { {-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},{-1,-1,1},{1,-1,1},{1,1,1},{-1,1,1} };
 static const unsigned short kIdx[36] = { 0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 2,3,7, 2,7,6, 1,2,6, 1,6,5, 3,0,4, 3,4,7 };
@@ -55,7 +57,7 @@ static bool worldSphere(RpAtomic *a, float *c, float *r)
 
 bool Occlusion_Cull(RpAtomic *atomic)
 {
-	if(!cfg || !gOn || !gHaveCam) return false;
+	if(!cfg || !gOn || gBroken || !gHaveCam) return false;
 	// only the main camera (not env-map / reflection cameras)
 	if(*(void**)(*(DWORD*)0xC97B24) != *(void**)0xC1703C) return false;
 	float c[3], r;
@@ -128,6 +130,16 @@ static void issueQueries(void)
 		if(!e.q){
 			if(FAILED(gDev->CreateQuery(D3DQUERYTYPE_OCCLUSION, &e.q))){ e.q = NULL; continue; }
 		}
+		static bool logged;
+		if(!logged && cfg->log){
+			logged = true;
+			if(!gLog) gLog = fopen("dualpass_occlusion.log", "w");
+			if(gLog){
+				fprintf(gLog, "first cube: centre %.1f %.1f %.1f half %.1f cam %.1f %.1f %.1f\n", e.cx, e.cy, e.cz, e.r, gCamX, gCamY, gCamZ);
+				fprintf(gLog, "combined row0 %.3f %.3f %.3f %.3f | row3 %.3f %.3f %.3f %.3f\n", comb[0], comb[1], comb[2], comb[3], comb[12], comb[13], comb[14], comb[15]);
+				fflush(gLog);
+			}
+		}
 		float info[4] = { e.cx, e.cy, e.cz, e.r*cfg->margin/100.0f };
 		dpSetVSConst(4, info, 1);
 		e.q->Issue(D3DISSUE_BEGIN);
@@ -163,6 +175,19 @@ void Occlusion_EndFrame(void)
 	}
 
 	pollResults();
+
+	// sanity guard: if nearly everything is "hidden" the proxy test itself is wrong (bad matrices / depth), not the world
+	{
+		unsigned tracked = 0, hid = 0;
+		for(auto &kv : gMap){ if(kv.second.lastSeen + 2 >= gFrame){ tracked++; if(kv.second.hidden) hid++; } }
+		if(tracked >= 30 && hid*100 > tracked*85) gBadFrames++; else gBadFrames = 0;
+		if(gBadFrames >= 20){
+			gBroken = true;
+			for(auto &kv : gMap){ kv.second.hidden = false; kv.second.zeroStreak = 0; }
+			if(!gLog) gLog = fopen("dualpass_occlusion.log", "w");
+			if(gLog){ fprintf(gLog, "frame %u: %u of %u tracked objects hidden for 20 frames in a row -> culling DISABLED (query test is not working)\n", gFrame, hid, tracked); fflush(gLog); }
+		}
+	}
 	issueQueries();
 
 	// atomics not seen for a while: streamed out, free them
@@ -172,7 +197,7 @@ void Occlusion_EndFrame(void)
 			else ++it;
 		}
 	}
-	if(cfg->log && gFrame % 300 == 0){
+	if(cfg->log && (gFrame % 300 == 0 || (gFrame < 600 && gFrame % 60 == 0))){
 		if(!gLog) gLog = fopen("dualpass_occlusion.log", "w");
 		if(gLog){
 			unsigned hid = 0; for(auto &kv : gMap) if(kv.second.hidden) hid++;
