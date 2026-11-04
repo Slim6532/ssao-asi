@@ -27,6 +27,8 @@
 #include "post.h"
 #include "clouds.h"
 #include "atmos.h"
+#include "ps2pipe.h"
+#include "occlusion.h"
 
 // ---------- things the plugin-sdk RenderWare headers don't provide ----------
 // alpha test render states / functions (RW 3.6 numbering)
@@ -80,6 +82,8 @@ static struct {
 	PostConfig postCfg;                          // FXAA + sharpening
 	CloudsConfig cloudsCfg;                      // fluffy clouds
 	AtmosConfig atmosCfg;                        // depth fog + bloom
+	PS2PipeConfig ps2Cfg;                        // SkyGfx PS2 building pipeline
+	OcclusionConfig occCfg;                      // occlusion queries for map objects
 } cfg;
 static int gFixGrassPlacement;
 
@@ -236,6 +240,23 @@ readConfig(HINSTANCE hInst)
 	cfg.cloudsCfg.fallbackG       = readInt("FluffyClouds", "fallbackG", 235, path);
 	cfg.cloudsCfg.fallbackB       = readInt("FluffyClouds", "fallbackB", 240, path);
 	cfg.cloudsCfg.log             = readInt("FluffyClouds", "log", 1, path);
+	cfg.ps2Cfg.enable          = readInt("PS2Pipe", "ps2Building", 0, path);
+	cfg.ps2Cfg.modulate        = readInt("PS2Pipe", "ps2Modulate", 1, path);
+	cfg.ps2Cfg.dualPass        = readInt("PS2Pipe", "dualPass", 1, path);
+	cfg.occCfg.enable          = readInt("Occlusion", "occlusion", 0, path);
+	cfg.occCfg.minDistance     = readInt("Occlusion", "minDistance", 25, path);
+	cfg.occCfg.minRadius       = readInt("Occlusion", "minRadius", 20, path);
+	cfg.occCfg.maxRadius       = readInt("Occlusion", "maxRadius", 250, path);
+	cfg.occCfg.margin          = readInt("Occlusion", "margin", 110, path);
+	cfg.occCfg.hiddenFrames    = readInt("Occlusion", "hiddenFrames", 3, path);
+	cfg.occCfg.interval        = readInt("Occlusion", "interval", 2, path);
+	cfg.occCfg.maxQueries      = readInt("Occlusion", "maxQueries", 1200, path);
+	cfg.occCfg.toggleKey       = readInt("Occlusion", "toggleKey", 119, path);   // 119 = F8
+	cfg.occCfg.log             = readInt("Occlusion", "log", 1, path);
+	if(cfg.occCfg.margin < 100) cfg.occCfg.margin = 100;
+	if(cfg.occCfg.hiddenFrames < 1) cfg.occCfg.hiddenFrames = 1;
+	if(cfg.occCfg.interval < 1) cfg.occCfg.interval = 1;
+	if(cfg.occCfg.maxQueries < 1) cfg.occCfg.maxQueries = 1;
 	cfg.ssaoCfg.interval    = readInt("AO", "updateInterval", 1, path);
 	if(cfg.ssaoCfg.interval < 0) cfg.ssaoCfg.interval = 0;
 	if(cfg.ssaoCfg.interval > 4) cfg.ssaoCfg.interval = 4;
@@ -246,6 +267,8 @@ readConfig(HINSTANCE hInst)
 	if(cfg.building < 0) cfg.building = cfg.global;
 	if(cfg.zwriteThreshold < 0) cfg.zwriteThreshold = 0;
 	if(cfg.zwriteThreshold > 255) cfg.zwriteThreshold = 255;
+	cfg.ps2Cfg.zwriteThreshold = cfg.zwriteThreshold;
+	if(!cfg.building) cfg.ps2Cfg.dualPass = 0;
 }
 
 // ---------- game variables we overwrite (CPostEffects) ----------
@@ -314,11 +337,17 @@ myDefaultCallback(RpAtomic *atomic)
 		RwRenderStateGet(rwRENDERSTATEZWRITEENABLE, (void*)&zwrite);
 		if(zwrite)
 			dodual = 1;
-	}else if((pipe == bldgPipe || pipe == bldgDNPipe) && cfg.building){
+	}else if(pipe == bldgPipe || pipe == bldgDNPipe){
 		// map objects: palms, fences, etc.
 		RwRenderStateGet(rwRENDERSTATEZWRITEENABLE, (void*)&zwrite);
-		if(zwrite)
-			dodual = 1;
+		if(zwrite){
+			// occlusion culling: skip buildings that were fully hidden behind others in previous frames
+			if(cfg.occCfg.enable && Occlusion_Cull(atomic))
+				return atomic;
+			// the PS2 building pipe does its own per-mesh dual pass
+			if(cfg.building && !cfg.ps2Cfg.enable)
+				dodual = 1;
+		}
 	}
 
 	if(dodual)
@@ -413,6 +442,10 @@ myColourFilter(unsigned c1, unsigned c2)
 
 	oColourFilter(c1, c2);                       // previous filter (game's own + any colour mod), unchanged
 
+	// occlusion queries: the scene depth is complete here and nothing post-process has touched it yet
+	if(cfg.occCfg.enable)
+		Occlusion_EndFrame();
+
 	// fluffy clouds: depth-tested against the world, never write depth, drawn before the AO so AO ignores them
 	if(cfg.cloudsCfg.enable)
 		Clouds_Draw();
@@ -495,7 +528,7 @@ fixSeed(void)
 static void
 installColourFilterHook(void)
 {
-	if(!(cfg.atmosCfg.enable || cfg.cloudsCfg.enable || cfg.blurEdges || cfg.ssao || cfg.postCfg.smaa || cfg.postCfg.fxaa || cfg.postCfg.sharpen)) return;
+	if(!(cfg.occCfg.enable || cfg.atmosCfg.enable || cfg.cloudsCfg.enable || cfg.blurEdges || cfg.ssao || cfg.postCfg.smaa || cfg.postCfg.fxaa || cfg.postCfg.sharpen)) return;
 	uint32_t prev = PTRFROMCALL(0x704D1E);        // current target of the call site (rel32 call/jmp)
 	if(prev == (uint32_t)myColourFilter) return;  // already hooked
 	oColourFilter = (DPColourFilterFn)prev;
@@ -515,6 +548,10 @@ DllMain(HINSTANCE hInst, DWORD reason, LPVOID)
 
 		InjectHook(0x7491C0, myDefaultCallback, PATCH_JUMP);          // default atomics, peds, vehicles
 		InjectHook(0x5BF8EA, CPlantMgr_Initialise_hook);              // grass
+
+		Occlusion_Init(&cfg.occCfg);
+		if(cfg.ps2Cfg.enable)
+			PS2Pipe_Install(&cfg.ps2Cfg);                             // SkyGfx PS2 building pipeline
 
 		if(cfg.disableClouds)
 			InjectHook(0x714145, 0x71422A, PATCH_JUMP);               // jump over cloud loop
