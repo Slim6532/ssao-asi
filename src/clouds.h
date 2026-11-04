@@ -9,6 +9,8 @@ struct CloudsConfig {
 	int   nightAlpha;      // 0..255 cloud alpha at night (blends with the time of day)
 	int   nightBrightness; // percent: how dark the clouds get at night
 	int   nightTint;       // 0..100: how much cool moonlit blue-grey the night clouds get
+	int   goldenHour;      // 0..100: strength of the pink sunrise / sunset cloud colour (0 = off)
+	int   pinkR, pinkG, pinkB;   // the pink the clouds turn into at golden hour
 	int   sunGlow;         // percent: strength of the sun-coloured lighting (needs highlight = 1)
 	int   brightness;      // percent multiplier on the timecyc colour (100 = unchanged)
 	int   whiten;          // 0..100: blend the timecyc colour towards white in daylight

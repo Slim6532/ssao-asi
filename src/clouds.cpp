@@ -312,7 +312,7 @@ static void dumpColourSet(const char *tag)
 struct Visible { int idx; RwV3d sp; float sx, sy; float hil; float sdx, sdy; float edge; };
 
 // values that are eased so sudden time / weather / timecyc jumps don't pop
-struct Smoothed { bool init; float day, fog, fl[3], sky[3], sun[3]; };
+struct Smoothed { bool init; float day, fog, warm, fl[3], sky[3], sun[3]; };
 static Smoothed gS;
 static float gFade;                       // 0..1, fades the clouds out in interiors
 static float gWindX1, gWindY1, gWindX2, gWindY2;   // accumulated wind drift per layer (world units)
@@ -383,6 +383,7 @@ void Clouds_Draw(void)
 	// ---- read the live timecyc: time of day, sun, sky, cloud colour, fog -> eased ----
 	float fogT = *(float*)ADDR_Foggyness;
 	if(!(fogT >= 0.0f && fogT <= 1.0f)) fogT = 0.0f;
+	float warmT = 0.0f;
 	float dayT = 1.0f, sunT[3] = { 255.0f, 190.0f, 130.0f }, skyT[3] = { 150.0f, 180.0f, 220.0f }, flT[3];
 	{
 		int r, g, b;
@@ -392,7 +393,10 @@ void Clouds_Draw(void)
 		}
 		if(readColour16(OFF_SUN_CORE, r, g, b)){
 			int mx = r > g ? r : g; if(b > mx) mx = b;
-			if(mx > 40){ sunT[0] = (float)(r * 255 / mx); sunT[1] = (float)(g * 255 / mx); sunT[2] = (float)(b * 255 / mx); }
+			if(mx > 40){
+				sunT[0] = (float)(r * 255 / mx); sunT[1] = (float)(g * 255 / mx); sunT[2] = (float)(b * 255 / mx);
+				warmT = clamp01((float)(r - b) / (float)mx);      // how orange the sun is: low sun = warm, noon = nearly white
+			}
 		}
 		for(int k = 0; k < 3; k++) sunT[k] += (255.0f - sunT[k]) * 0.25f;    // a bit of white in the glow
 		if(!readTimecycColour(r, g, b)){ r = cfg.fallbackR; g = cfg.fallbackG; b = cfg.fallbackB; }
@@ -401,7 +405,7 @@ void Clouds_Draw(void)
 	{
 		float k = (cfg.smoothing > 0 && gS.init) ? 1.0f - expf(-dtms / (float)cfg.smoothing) : 1.0f;
 		gS.init = true;
-		gS.day += (dayT - gS.day) * k;  gS.fog += (fogT - gS.fog) * k;
+		gS.day += (dayT - gS.day) * k;  gS.warm += (warmT - gS.warm) * k;  gS.fog += (fogT - gS.fog) * k;
 		for(int i = 0; i < 3; i++){
 			gS.fl[i]  += (flT[i]  - gS.fl[i])  * k;
 			gS.sky[i] += (skyT[i] - gS.sky[i]) * k;
@@ -430,9 +434,19 @@ void Clouds_Draw(void)
 	int rawR = br, rawG = bg, rawB = bb;
 	br = br * cfg.brightness / 100; bg = bg * cfg.brightness / 100; bb = bb * cfg.brightness / 100;
 	if(br > 255) br = 255; if(bg > 255) bg = 255; if(bb > 255) bb = 255;
-	int wh = (int)(cfg.whiten * day);          // pull towards white in daylight only
+	// golden hour (sunrise / sunset): how close the sun is to the horizon, from the sun's colour, only while
+	// there is still daylight in the sky. 0 = noon or night, 1 = clear sunrise/sunset
+	float golden = smooth01((gS.warm - 0.35f) / 0.40f) * smooth01((day - 0.10f) / 0.30f) * (cfg.goldenHour / 100.0f);
+	int wh = (int)(cfg.whiten * day * (1.0f - 0.8f * golden));          // pull towards white in daylight only, less at golden hour
 	if(wh > 0){
 		br += (255 - br) * wh / 100; bg += (255 - bg) * wh / 100; bb += (255 - bb) * wh / 100;
+	}
+	if(golden > 0.0f){   // natural pink / salmon sunrise and sunset clouds
+		int pr = cfg.pinkR * cfg.brightness / 100, pg = cfg.pinkG * cfg.brightness / 100, pb = cfg.pinkB * cfg.brightness / 100;
+		if(pr > 255) pr = 255; if(pg > 255) pg = 255; if(pb > 255) pb = 255;
+		br = (int)lerpf((float)br, (float)pr, golden);
+		bg = (int)lerpf((float)bg, (float)pg, golden);
+		bb = (int)lerpf((float)bb, (float)pb, golden);
 	}
 	{	// night: darker, with a cool moonlit blue-grey tint
 		float n = 1.0f - day;
@@ -447,8 +461,8 @@ void Clouds_Draw(void)
 		DWORD t = GetTickCount();
 		if(nLog < 60 && t - lastLog > 5000){
 			lastLog = t; nLog++;
-			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, day %.2f, sun %d %d %d, sky %d %d %d, fog %.2f, alpha %d, fade %.2f, sunScreen %.0f %.0f, camZ %.0f, layerZ %.0f",
-				rawR, rawG, rawB, br, bg, bb, day, sunR, sunG, sunB, skyR, skyG, skyB, fog, fluffyalpha, gFade,
+			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, day %.2f, golden %.2f, sun %d %d %d, sky %d %d %d, fog %.2f, alpha %d, fade %.2f, sunScreen %.0f %.0f, camZ %.0f, layerZ %.0f",
+				rawR, rawG, rawB, br, bg, bb, day, golden, sunR, sunG, sunB, skyR, skyG, skyB, fog, fluffyalpha, gFade,
 				*(float*)ADDR_SunScreenX, *(float*)ADDR_SunScreenY, campos.z, baseZ);
 		}
 	}
@@ -664,6 +678,8 @@ void Clouds_Install(const CloudsConfig *c)
 	cfg.layer2Distance = clampi(cfg.layer2Distance, 50, 400);
 	cfg.layer2Speed = clampi(cfg.layer2Speed, 0, 300);
 	cfg.windSpeed = clampi(cfg.windSpeed, -1, 500);
+	cfg.goldenHour = clampi(cfg.goldenHour, 0, 100);
+	cfg.pinkR = clampi(cfg.pinkR, 0, 255); cfg.pinkG = clampi(cfg.pinkG, 0, 255); cfg.pinkB = clampi(cfg.pinkB, 0, 255);
 	cfg.nearFade = clampi(cfg.nearFade, 0, 1000);
 	cfg.minClearance = clampi(cfg.minClearance, 0, 500);
 	cfg.windMode = cfg.windMode ? 1 : 0;
