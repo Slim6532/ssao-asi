@@ -2,6 +2,8 @@
 // Left out on purpose: Xbox/sphere-map variants, detail maps (TexDB), tag fading, SA-MP fog fix.
 #define _CRT_SECURE_NO_WARNINGS
 #include <string.h>
+#include <stdio.h>
+#include <stdarg.h>
 #include "rwd3d9_wrap.h"
 #include "ps2pipe.h"
 #include "ps2_bld_vs.h"
@@ -10,6 +12,29 @@
 #include "ps2_envfx_ps.h"
 
 static const PS2PipeConfig *cfg;
+static volatile long gDisabled;      // set after the first exception inside the pipe: draw nothing instead of crashing
+
+static void plog(const char *fmt, ...)
+{
+	static FILE *f;
+	if(!f) f = fopen("dualpass_ps2.log", "w");
+	if(!f) return;
+	va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
+	fputc('\n', f); fflush(f);
+}
+static int logException(EXCEPTION_POINTERS *ep, const char *where)
+{
+	HMODULE me = NULL;
+	GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)&logException, &me);
+	DWORD addr = (DWORD)ep->ExceptionRecord->ExceptionAddress;
+	plog("EXCEPTION in %s: code %08X at %08X (dualpass.asi base %08X, offset %08X; gta_sa.exe addresses are absolute)",
+	     where, ep->ExceptionRecord->ExceptionCode, addr, (DWORD)me, addr - (DWORD)me);
+	if(ep->ExceptionRecord->NumberParameters >= 2)
+		plog("  access type %u, address %08X", (unsigned)ep->ExceptionRecord->ExceptionInformation[0], (unsigned)ep->ExceptionRecord->ExceptionInformation[1]);
+	InterlockedExchange(&gDisabled, 1);
+	plog("PS2 building pipe disabled for the rest of the session (buildings will not draw)");
+	return EXCEPTION_EXECUTE_HANDLER;
+}
 
 // ---- game variables ----
 static int &gtaPipeOffset            = *(int*)0x8D6080;
@@ -121,12 +146,19 @@ static void envMatrix(RpAtomic *atomic, float *out12)
 	memcpy(out12, &m, 48);
 }
 
-static void ps2BuildingRender(RwResEntry *repEntry, void *object, unsigned char type, unsigned flags)
+static void ps2BuildingRenderImpl(RwResEntry *repEntry, void *object, unsigned char type, unsigned flags)
 {
 	RpAtomic *atomic = (RpAtomic*)object;
 	DPResEntryHeader *h = (DPResEntryHeader*)(repEntry + 1);
 	DPInstanceData *d = (DPInstanceData*)(h + 1);
-	if(h->numMeshes == 0 || h->numMeshes > 2000) return;    // sanity: wrong struct layout would show up here
+	static bool first = true;
+	if(first){
+		first = false;
+		plog("first render: numMeshes %u indexBuffer %p primType %u stream0 vb %p stride %u useOffsets %d decl %p totalVerts %u | mesh0 numIndices %u minVert %u numVerts %d material %p baseIndex %u startIndex %u prims %u",
+		     h->numMeshes, h->indexBuffer, h->primType, h->vertexStream[0].vertexBuffer, h->vertexStream[0].stride, h->useOffsets,
+		     h->vertexDeclaration, h->totalNumVertex, d->numIndices, d->minVert, d->numVertices, d->material, d->baseIndex, d->startIndex, d->numPrimitives);
+	}
+	if(h->numMeshes == 0 || h->numMeshes > 2000 || !h->vertexStream[0].vertexBuffer || !h->vertexDeclaration) return;   // sanity: wrong struct layout shows up here
 
 	dpEnableClipping(object, type);
 	float transform[16];
@@ -218,6 +250,13 @@ static void ps2BuildingRender(RwResEntry *repEntry, void *object, unsigned char 
 	dpSetTSS(1, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
 }
 
+static void ps2BuildingRender(RwResEntry *repEntry, void *object, unsigned char type, unsigned flags)
+{
+	if(gDisabled) return;
+	__try { ps2BuildingRenderImpl(repEntry, object, type, flags); }
+	__except(logException(GetExceptionInformation(), "render callback")) { }
+}
+
 // ---- instancing (SkyGfx DNInstance_PS2): pos, uv, normal, night colour (COLOR0), day colour (COLOR1) ----
 static RwRGBA *extraColours(RpGeometry *g) { return *PLUGIN(RwRGBA*, g, extraVertColourOffset); }
 static RwRGBA *dayColours(RpGeometry *g)
@@ -228,7 +267,7 @@ static RwRGBA *dayColours(RpGeometry *g)
 static bool allZero(RwRGBA *c, int n) { unsigned *u = (unsigned*)c; while(n--) if(*u++) return false; return true; }
 static void instWhite(unsigned char *mem, int n, unsigned stride) { while(n--){ *(unsigned*)mem = 0xFFFFFFFF; mem += stride; } }
 
-static int instancePS2(void *object, DPResEntryHeader *h, int reinstance)
+static int instanceImpl(void *object, DPResEntryHeader *h, int reinstance)
 {
 	RpAtomic *atomic = (RpAtomic*)object;
 	RpGeometry *geo = atomic->geometry;
@@ -325,6 +364,16 @@ static int instancePS2(void *object, DPResEntryHeader *h, int reinstance)
 	return 1;
 }
 
+static int instancePS2(void *object, DPResEntryHeader *h, int reinstance)
+{
+	static bool first = true;
+	if(first){ first = false; plog("first instance call (reinstance=%d, header %p, sizeof header %u)", reinstance, h, (unsigned)sizeof(DPResEntryHeader)); }
+	if(gDisabled) return 0;
+	__try { return instanceImpl(object, h, reinstance); }
+	__except(logException(GetExceptionInformation(), "instance callback")) { }
+	return 0;
+}
+
 static int reinstance(void *object, RwResEntry *res, DPInstanceCB cb)
 {
 	return cb == NULL || cb(object, (DPResEntryHeader*)(res + 1), 1) != 0;
@@ -332,6 +381,7 @@ static int reinstance(void *object, RwResEntry *res, DPInstanceCB cb)
 
 static RxPipeline *createPipe(unsigned id)
 {
+	plog("creating building pipeline id %08X", id);
 	RxPipeline *pipe = (RxPipeline*)dpPipeCreate();
 	void *def = dpAllInOneDef();
 	if(!pipe) return NULL;
@@ -347,6 +397,7 @@ static RxPipeline *createPipe(unsigned id)
 	createShaders();
 	pipe->pluginId = id;
 	pipe->pluginData = id;
+	plog("pipeline %p ready, shaders vs %p vsfx %p ps %p psenv %p", pipe, vsBuilding, vsBuildingFx, psSimple, psEnvFx);
 	return pipe;
 }
 static RxPipeline *createBuildingPipe(void)   { return createPipe(ID_BUILDING); }
@@ -355,7 +406,15 @@ static RxPipeline *createBuildingDNPipe(void) { return createPipe(ID_BUILDING_DN
 void PS2Pipe_Install(const PS2PipeConfig *c)
 {
 	cfg = c;
+	// the two creator hooks only rewrite a rel32, so both addresses must really be CALL instructions
+	unsigned char b1 = *(unsigned char*)0x5D7100, b2 = *(unsigned char*)0x5D7D90, b3 = *(unsigned char*)0x5D7200;
+	plog("install: bytes at 5D7100 = %02X, 5D7D90 = %02X (expect E8), 5D7200 = %02X", b1, b2, b3);
+	if(b1 != 0xE8 || b2 != 0xE8){
+		plog("not a call at the hook sites: PS2 building pipe NOT installed (game keeps its own pipelines)");
+		return;
+	}
 	InjectHook(0x5D7100, createBuildingDNPipe);   // CCustomBuildingDNPipeline::CreateCustomObjPipe
 	InjectHook(0x5D7D90, createBuildingPipe);     // CCustomBuildingPipeline::CreateCustomObjPipe
 	Patch<unsigned char>(0x5D7200, 0xC3);         // the game's CPU colour interpolation is replaced by the shader blend
+	plog("hooks installed");
 }
