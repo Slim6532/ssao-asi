@@ -62,9 +62,5 @@ every pixel samples the same lattice directly. `quality = 2` renders at full res
 - Bloom (quarter-res bright-pass + separable blur) makes lit windows, lamps, headlights and siren lights glow, more at night.
 - Not included (needs hooks into the game's own lighting / particle code): new headlight beams, siren lights, neon interior lights with shadows, soft particles.
 
-## PS2 building pipeline (from SkyGfx 4.2b)
-`[PS2Pipe]` in dualpass.ini, source in `src/ps2pipe.cpp` + `src/ps2_*.hlsl`. Replaces the game's two building pipelines (plain + day/night) like SkyGfx's `buildingPipe = 0`: day/night vertex colours are blended in a vertex shader, PS2 modulate, env-map pass, dual pass per mesh. The pipelines are created by the game after the ASI loads, so the hooks are installed in `DllMain` and a restart is needed. Not ported: Xbox/sphere-map variants, detail maps (TexDB), vehicles.
-`src/rwd3d9_wrap.h` holds the RW D3D9 wrappers and the three RW struct layouts (`RxD3D9ResEntryHeader`, `RxD3D9InstanceData`, vertex stream) - written from the RW 3.6 SDK layout, check them if your headers differ.
-
 ## Occlusion culling
 `[Occlusion]` in dualpass.ini, source in `src/occlusion.cpp`. D3D9 occlusion queries: at the end of the frame each map-object atomic's bounding cube is drawn against the finished depth buffer (colour/depth writes off); the result is read without blocking 1-2 frames later. An object is skipped only after `hiddenFrames` hidden results in a row, never closer than `minDistance`, never on env-map cameras, and everything is reset on camera cuts and device reset. F8 toggles it, `dualpass_occlusion.log` shows tracked/hidden counts. Peds, vehicles and grass are not culled.

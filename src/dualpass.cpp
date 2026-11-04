@@ -27,7 +27,6 @@
 #include "post.h"
 #include "clouds.h"
 #include "atmos.h"
-#include "ps2pipe.h"
 #include "occlusion.h"
 
 // ---------- things the plugin-sdk RenderWare headers don't provide ----------
@@ -82,7 +81,6 @@ static struct {
 	PostConfig postCfg;                          // FXAA + sharpening
 	CloudsConfig cloudsCfg;                      // fluffy clouds
 	AtmosConfig atmosCfg;                        // depth fog + bloom
-	PS2PipeConfig ps2Cfg;                        // SkyGfx PS2 building pipeline
 	OcclusionConfig occCfg;                      // occlusion queries for map objects
 } cfg;
 static int gFixGrassPlacement;
@@ -240,9 +238,6 @@ readConfig(HINSTANCE hInst)
 	cfg.cloudsCfg.fallbackG       = readInt("FluffyClouds", "fallbackG", 235, path);
 	cfg.cloudsCfg.fallbackB       = readInt("FluffyClouds", "fallbackB", 240, path);
 	cfg.cloudsCfg.log             = readInt("FluffyClouds", "log", 1, path);
-	cfg.ps2Cfg.enable          = readInt("PS2Pipe", "ps2Building", 0, path);
-	cfg.ps2Cfg.modulate        = readInt("PS2Pipe", "ps2Modulate", 1, path);
-	cfg.ps2Cfg.dualPass        = readInt("PS2Pipe", "dualPass", 1, path);
 	cfg.occCfg.enable          = readInt("Occlusion", "occlusion", 0, path);
 	cfg.occCfg.minDistance     = readInt("Occlusion", "minDistance", 25, path);
 	cfg.occCfg.minRadius       = readInt("Occlusion", "minRadius", 20, path);
@@ -267,8 +262,6 @@ readConfig(HINSTANCE hInst)
 	if(cfg.building < 0) cfg.building = cfg.global;
 	if(cfg.zwriteThreshold < 0) cfg.zwriteThreshold = 0;
 	if(cfg.zwriteThreshold > 255) cfg.zwriteThreshold = 255;
-	cfg.ps2Cfg.zwriteThreshold = cfg.zwriteThreshold;
-	if(!cfg.building) cfg.ps2Cfg.dualPass = 0;
 }
 
 // ---------- game variables we overwrite (CPostEffects) ----------
@@ -344,8 +337,7 @@ myDefaultCallback(RpAtomic *atomic)
 			// occlusion culling: skip buildings that were fully hidden behind others in previous frames
 			if(cfg.occCfg.enable && Occlusion_Cull(atomic))
 				return atomic;
-			// the PS2 building pipe does its own per-mesh dual pass
-			if(cfg.building && !cfg.ps2Cfg.enable)
+			if(cfg.building)
 				dodual = 1;
 		}
 	}
@@ -550,8 +542,6 @@ DllMain(HINSTANCE hInst, DWORD reason, LPVOID)
 		InjectHook(0x5BF8EA, CPlantMgr_Initialise_hook);              // grass
 
 		Occlusion_Init(&cfg.occCfg);
-		if(cfg.ps2Cfg.enable)
-			PS2Pipe_Install(&cfg.ps2Cfg);                             // SkyGfx PS2 building pipeline
 
 		if(cfg.disableClouds)
 			InjectHook(0x714145, 0x71422A, PATCH_JUMP);               // jump over cloud loop

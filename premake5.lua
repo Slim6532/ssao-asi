@@ -17,10 +17,6 @@ project "dualpass"
 	flags { "StaticRuntime" }
 	-- compile the SSAO shaders into headers (fxc comes with the Windows SDK)
 	prebuildcommands {
-		'fxc /nologo /O3 /T vs_3_0 /E main /Vn g_vsPS2Building /Fh ..\\src\\ps2_bld_vs.h ..\\src\\ps2_bld_vs.hlsl',
-		'fxc /nologo /O3 /T vs_3_0 /E main /Vn g_vsPS2BuildingFx /Fh ..\\src\\ps2_bldfx_vs.h ..\\src\\ps2_bldfx_vs.hlsl',
-		'fxc /nologo /O3 /T ps_3_0 /E main /Vn g_psPS2Simple /Fh ..\\src\\ps2_simple_ps.h ..\\src\\ps2_simple_ps.hlsl',
-		'fxc /nologo /O3 /T ps_3_0 /E main /Vn g_psPS2EnvFx /Fh ..\\src\\ps2_envfx_ps.h ..\\src\\ps2_envfx_ps.hlsl',
 		'fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsOccl /Fh ..\\src\\occl_vs.h ..\\src\\occl.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSMain /Vn g_psOccl /Fh ..\\src\\occl_ps.h ..\\src\\occl.hlsl',
 		'fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsQuad /Fh ..\\src\\ssao_vs.h ..\\src\\ssao.hlsl',

@@ -1,6 +1,6 @@
 #pragma once
 // Shared RenderWare D3D9 wrappers (GTA SA 1.0 US addresses, taken from SkyGfx gta.cpp) and the
-// few RW D3D9 pipeline structs the PS2 building pipe needs.
+// few RW D3D9 pipeline structs (unused by occlusion; kept for future pipeline work).
 //
 // !! The three structs below are written from the RW 3.6/3.7 D3D9 SDK layout (what SkyGfx gets from
 // !! the real RWSDK headers). If your header set already has RxD3D9ResEntryHeader/RxD3D9InstanceData
