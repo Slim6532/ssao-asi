@@ -18,6 +18,8 @@ struct CloudsConfig {
 	int   highlight;       // 1 = sun lighting + additive sun highlight pass
 	int   windSpeed;       // percent, drift speed (original used CWeather::Wind). <0 counts as 0
 	int   fadeAtHeight;    // 1 = fade clouds out when the camera is far above the layer (planes, jetpack)
+	int   nearFade;        // game units: clouds closer to the camera than this fade out (0 = off). Stops giant blobs at the lens
+	int   minClearance;    // game units: the cloud layer is kept at least this far ABOVE the camera (0 = off)
 	// --- motion / transitions ---
 	int   windMode;        // 1 = clouds drift across the sky in one wind direction (wrap-around), 0 = original (ring rotates around you)
 	int   windDirection;   // degrees, world direction the clouds drift towards (windMode 1)

@@ -420,6 +420,10 @@ void Clouds_Draw(void)
 		fluffyalpha -= (int)((campos.z - baseZ) * ((255.0f - (float)cfg.alpha) / 255.0f));
 	if(fluffyalpha <= 0) return;
 	if(fluffyalpha > 255) fluffyalpha = 255;
+	// keep the whole layer ABOVE the camera: when the camera is level with or above the layer (spawn screen,
+	// rooftops, hills, planes) the sprites would end up around the lens as huge blobs
+	if(cfg.minClearance > 0 && campos.z + (float)cfg.minClearance > baseZ)
+		baseZ = campos.z + (float)cfg.minClearance;
 
 	// base cloud colour
 	int br = (int)gS.fl[0], bg = (int)gS.fl[1], bb = (int)gS.fl[2];
@@ -443,8 +447,9 @@ void Clouds_Draw(void)
 		DWORD t = GetTickCount();
 		if(nLog < 60 && t - lastLog > 5000){
 			lastLog = t; nLog++;
-			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, day %.2f, sun %d %d %d, sky %d %d %d, fog %.2f, alpha %d, fade %.2f",
-				rawR, rawG, rawB, br, bg, bb, day, sunR, sunG, sunB, skyR, skyG, skyB, fog, fluffyalpha, gFade);
+			LOG("timecyc fluffy RGB = %d %d %d -> used %d %d %d, day %.2f, sun %d %d %d, sky %d %d %d, fog %.2f, alpha %d, fade %.2f, sunScreen %.0f %.0f, camZ %.0f, layerZ %.0f",
+				rawR, rawG, rawB, br, bg, bb, day, sunR, sunG, sunB, skyR, skyG, skyB, fog, fluffyalpha, gFade,
+				*(float*)ADDR_SunScreenX, *(float*)ADDR_SunScreenY, campos.z, baseZ);
 		}
 	}
 
@@ -537,6 +542,10 @@ void Clouds_Draw(void)
 		if(vis01 <= 0.004f) continue;
 		float szx, szy; RwV3d sp;
 		if(!calc(wp, &sp, &szx, &szy, false, false)) continue;
+		if(cfg.nearFade > 0){                          // clouds close to the lens fade out instead of becoming giant blobs
+			vis01 *= smooth01((sp.z - cfg.nearFade * 0.5f) / (float)cfg.nearFade);
+			if(vis01 <= 0.004f) continue;
+		}
 
 		Visible &v = vis[nVis++];
 		v.idx = i; v.sp = sp; v.sx = szx; v.sy = szy; v.hil = 0.0f; v.sdx = 0.0f; v.sdy = -1.0f; v.edge = vis01;
@@ -616,8 +625,8 @@ void Clouds_Draw(void)
 				float dm = c.layer ? dist2 : dist;
 				float dx = v.sp.x - sunX, dy = v.sp.y - sunY;
 				float ang = atan2f(dx, dy); if(ang < 0.0f) ang += 6.2831853f;     // angle from +Y, like CGeneral::GetATanOfXY
-				float sz = 30.0f * cfg.size / 100.0f * dm * c.size;
-				float k = v.hil * 0.8f * (c.layer ? cfg.layer2Alpha / 100.0f : 1.0f) * master;
+				float sz = 22.0f * cfg.size / 100.0f * dm * c.size;
+				float k = v.hil * 0.45f * (c.layer ? cfg.layer2Alpha / 100.0f : 1.0f) * master;
 				addSpriteHighlight(v.sp.x, v.sp.y, v.sp.z, v.sx * sz, v.sy * sz,
 					(int)(sunR * k), (int)(sunG * k), (int)(sunB * k), 1.0f / v.sp.z, 1.7f - ang);
 			}
@@ -655,6 +664,8 @@ void Clouds_Install(const CloudsConfig *c)
 	cfg.layer2Distance = clampi(cfg.layer2Distance, 50, 400);
 	cfg.layer2Speed = clampi(cfg.layer2Speed, 0, 300);
 	cfg.windSpeed = clampi(cfg.windSpeed, -1, 500);
+	cfg.nearFade = clampi(cfg.nearFade, 0, 1000);
+	cfg.minClearance = clampi(cfg.minClearance, 0, 500);
 	cfg.windMode = cfg.windMode ? 1 : 0;
 	cfg.windDirection = clampi(cfg.windDirection, -360, 720);
 	cfg.parallax = clampi(cfg.parallax, 0, 50);
