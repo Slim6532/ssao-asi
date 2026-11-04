@@ -39,6 +39,12 @@ jobs:
           fxc /nologo /O3 /T ps_3_0 /E PSBright /Vn g_psBloomBright  /Fh src\atmos_ps_bright.h src\atmos.hlsl || exit /b 1
           fxc /nologo /O3 /T ps_3_0 /E PSBlur   /Vn g_psBloomBlur    /Fh src\atmos_ps_blur.h   src\atmos.hlsl || exit /b 1
           fxc /nologo /O3 /T ps_3_0 /E PSAtmos  /Vn g_psAtmos        /Fh src\atmos_ps_final.h  src\atmos.hlsl || exit /b 1
+          fxc /nologo /O3 /T vs_3_0 /E main /Vn g_vsPS2Building   /Fh src\\ps2_bld_vs.h    src\\ps2_bld_vs.hlsl    || exit /b 1
+          fxc /nologo /O3 /T vs_3_0 /E main /Vn g_vsPS2BuildingFx /Fh src\\ps2_bldfx_vs.h  src\\ps2_bldfx_vs.hlsl  || exit /b 1
+          fxc /nologo /O3 /T ps_3_0 /E main /Vn g_psPS2Simple     /Fh src\\ps2_simple_ps.h src\\ps2_simple_ps.hlsl || exit /b 1
+          fxc /nologo /O3 /T ps_3_0 /E main /Vn g_psPS2EnvFx      /Fh src\\ps2_envfx_ps.h  src\\ps2_envfx_ps.hlsl  || exit /b 1
+          fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsOccl        /Fh src\\occl_vs.h       src\\occl.hlsl          || exit /b 1
+          fxc /nologo /O3 /T ps_3_0 /E PSMain /Vn g_psOccl        /Fh src\\occl_ps.h       src\\occl.hlsl          || exit /b 1
           rem --- optional SMAA: only when the official files were added to src\ (otherwise FXAA is used) ---
           if exist src\SMAA.hlsl if exist src\AreaTex.h if exist src\SearchTex.h (
             fxc /nologo /O3 /T vs_3_0 /E VSEdge   /Vn g_vsSmaaEdge   /Fh src\smaa_vs_edge.h   src\post_smaa.hlsl || exit /b 1
@@ -51,7 +57,7 @@ jobs:
 
       - name: main dualpass.asi
         shell: cmd
-        run: cl /nologo /LD /O2 /MT /Zc:threadSafeInit- /I src /I "%RWINC%" src\dualpass.cpp src\ssao.cpp src\post.cpp src\clouds.cpp src\atmos.cpp /Fe:dualpass.asi
+        run: cl /nologo /LD /O2 /MT /Zc:threadSafeInit- /I src /I "%RWINC%" src\dualpass.cpp src\ssao.cpp src\post.cpp src\clouds.cpp src\atmos.cpp src\ps2pipe.cpp src\occlusion.cpp /Fe:dualpass.asi
 
       - uses: actions/upload-artifact@v4
         with:
