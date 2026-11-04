@@ -56,11 +56,8 @@ every pixel samples the same lattice directly. `quality = 2` renders at full res
 - Don't run it together with the standalone `FluffyCloudsSA.asi`.
 - `src/clouds.cpp` lists every game address it uses at the top; `dualpass_clouds.log` shows what it read.
 
-## Atmosphere (fog + bloom)
-`[Atmosphere]` in dualpass.ini, source in `src/atmos.cpp` + `src/atmos.hlsl`. One extra screen-space pass after the AO and before FXAA/SMAA.
-- Fog is depth based, coloured with the live timecyc sky colour, warm towards the sun. Needs `ssao = 1` (it uses the AO module's INTZ depth).
-- Bloom (quarter-res bright-pass + separable blur) makes lit windows, lamps, headlights and siren lights glow, more at night.
-- Not included (needs hooks into the game's own lighting / particle code): new headlight beams, siren lights, neon interior lights with shadows, soft particles.
-
 ## Occlusion culling
 `[Occlusion]` in dualpass.ini, source in `src/occlusion.cpp`. D3D9 occlusion queries: at the end of the frame each map-object atomic's bounding cube is drawn against the finished depth buffer (colour/depth writes off); the result is read without blocking 1-2 frames later. An object is skipped only after `hiddenFrames` hidden results in a row, never closer than `minDistance`, never on env-map cameras, and everything is reset on camera cuts and device reset. F8 toggles it, `dualpass_occlusion.log` shows tracked/hidden counts. Peds, vehicles and grass are not culled.
+
+## TAA (temporal anti-aliasing)
+`[TAA]` in dualpass.ini, source `src/taa.cpp` + `src/taa.hlsl`. Sub-pixel camera jitter (Halton, via `RwCamera::viewOffset`), a history buffer, camera-motion reprojection from the AO's INTZ depth and 3x3 variance clipping. Needs `ssao = 1`; without it (or if jitter has no effect) FXAA is used. The jitter gain is measured from the real projection matrix every frame, so no assumption about RenderWare's formula is made. Moving objects (peds, cars) have no motion vectors: the clip removes most ghosting, raise `blend` if you still see trails. Keep `sharpen = 1` to counter the slight softness. `dualpass_taa.log` says what happened; F12 toggles.

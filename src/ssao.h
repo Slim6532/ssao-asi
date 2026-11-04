@@ -23,6 +23,6 @@ struct SSAOConfig {
 void SSAO_Apply(float nearZ, float farZ, float viewWinX, float viewWinY, const SSAOConfig *cfg);
 
 // The INTZ depth texture of the main scene (NULL until the AO module has swapped it in, or when INTZ is unavailable).
-// Other passes (atmosphere: fog / heat haze) sample it. Valid only while SSAO is enabled.
+// Other passes may sample it. Valid only while SSAO is enabled.
 struct IDirect3DTexture9;
 IDirect3DTexture9 *SSAO_GetDepthTexture(void);

@@ -25,8 +25,8 @@
 #include "MemoryMgr.h"
 #include "ssao.h"
 #include "post.h"
+#include "taa.h"
 #include "clouds.h"
-#include "atmos.h"
 #include "occlusion.h"
 
 // ---------- things the plugin-sdk RenderWare headers don't provide ----------
@@ -79,8 +79,8 @@ static struct {
 	// native SSAO
 	int ssao; SSAOConfig ssaoCfg;
 	PostConfig postCfg;                          // FXAA + sharpening
+	TAAConfig taaCfg;                            // temporal anti-aliasing
 	CloudsConfig cloudsCfg;                      // fluffy clouds
-	AtmosConfig atmosCfg;                        // depth fog + bloom
 	OcclusionConfig occCfg;                      // occlusion queries for map objects
 } cfg;
 static int gFixGrassPlacement;
@@ -166,38 +166,6 @@ readConfig(HINSTANCE hInst)
 	if(cfg.postCfg.edgeThresh > 0.5f)  cfg.postCfg.edgeThresh = 0.5f;
 	if(cfg.postCfg.sharpAmount < 0.0f) cfg.postCfg.sharpAmount = 0.0f;
 	if(cfg.postCfg.sharpAmount > 1.0f) cfg.postCfg.sharpAmount = 1.0f;
-	cfg.atmosCfg.enable              = readInt("Atmosphere", "atmosphere", 0, path);
-	cfg.atmosCfg.toggleKey           = readInt("Atmosphere", "toggleKey", 122, path);     // 122 = F11
-	cfg.atmosCfg.fog                 = readInt("Atmosphere", "fog", 1, path);
-	cfg.atmosCfg.fogStrength         = readInt("Atmosphere", "fogStrength", 30, path);
-	cfg.atmosCfg.fogDesaturate        = readInt("Atmosphere", "fogDesaturate", 55, path);
-	cfg.atmosCfg.fogStart            = readInt("Atmosphere", "fogStart", 150, path);
-	cfg.atmosCfg.fogEnd              = readInt("Atmosphere", "fogEnd", 100, path);
-	cfg.atmosCfg.fogCurve            = readInt("Atmosphere", "fogCurve", 250, path);
-	cfg.atmosCfg.sunScatter          = readInt("Atmosphere", "sunScatter", 10, path);
-	cfg.atmosCfg.bloom               = readInt("Atmosphere", "bloom", 1, path);
-	cfg.atmosCfg.bloomIntensity      = readInt("Atmosphere", "bloomIntensity", 35, path);
-	cfg.atmosCfg.bloomDay            = readInt("Atmosphere", "bloomDay", 40, path);
-	cfg.atmosCfg.bloomThresholdDay   = readInt("Atmosphere", "bloomThresholdDay", 90, path);
-	cfg.atmosCfg.bloomThresholdNight = readInt("Atmosphere", "bloomThresholdNight", 50, path);
-	cfg.atmosCfg.bloomNightBoost     = readInt("Atmosphere", "bloomNightBoost", 80, path);
-	cfg.atmosCfg.bloomSize           = readInt("Atmosphere", "bloomSize", 100, path);
-	cfg.atmosCfg.log                 = readInt("Atmosphere", "log", 1, path);
-	{
-		AtmosConfig &a = cfg.atmosCfg;
-		if(a.fogStrength < 0) a.fogStrength = 0; if(a.fogStrength > 100) a.fogStrength = 100;
-		if(a.fogDesaturate < 0) a.fogDesaturate = 0; if(a.fogDesaturate > 100) a.fogDesaturate = 100;
-		if(a.fogStart < 5) a.fogStart = 5; if(a.fogStart > 300) a.fogStart = 300;
-		if(a.fogEnd < 20) a.fogEnd = 20; if(a.fogEnd > 300) a.fogEnd = 300;
-		if(a.fogCurve < 50) a.fogCurve = 50; if(a.fogCurve > 400) a.fogCurve = 400;
-		if(a.sunScatter < 0) a.sunScatter = 0; if(a.sunScatter > 200) a.sunScatter = 200;
-		if(a.bloomIntensity < 0) a.bloomIntensity = 0; if(a.bloomIntensity > 300) a.bloomIntensity = 300;
-		if(a.bloomDay < 0) a.bloomDay = 0; if(a.bloomDay > 300) a.bloomDay = 300;
-		if(a.bloomThresholdDay < 0) a.bloomThresholdDay = 0; if(a.bloomThresholdDay > 100) a.bloomThresholdDay = 100;
-		if(a.bloomThresholdNight < 0) a.bloomThresholdNight = 0; if(a.bloomThresholdNight > 100) a.bloomThresholdNight = 100;
-		if(a.bloomNightBoost < 0) a.bloomNightBoost = 0; if(a.bloomNightBoost > 500) a.bloomNightBoost = 500;
-		if(a.bloomSize < 30) a.bloomSize = 30; if(a.bloomSize > 300) a.bloomSize = 300;
-	}
 	cfg.cloudsCfg.enable          = readInt("FluffyClouds", "fluffyClouds", 0, path);
 	cfg.cloudsCfg.alpha           = readInt("FluffyClouds", "alpha", 160, path);
 	cfg.cloudsCfg.nightAlpha      = readInt("FluffyClouds", "nightAlpha", 90, path);
@@ -252,6 +220,15 @@ readConfig(HINSTANCE hInst)
 	if(cfg.occCfg.hiddenFrames < 1) cfg.occCfg.hiddenFrames = 1;
 	if(cfg.occCfg.interval < 1) cfg.occCfg.interval = 1;
 	if(cfg.occCfg.maxQueries < 1) cfg.occCfg.maxQueries = 1;
+	cfg.taaCfg.enable    = readInt("TAA", "taa", 0, path);
+	cfg.taaCfg.blend     = readInt("TAA", "blend", 10, path);
+	cfg.taaCfg.clipGamma = readInt("TAA", "clipGamma", 125, path);
+	cfg.taaCfg.jitter    = readInt("TAA", "jitter", 100, path);
+	cfg.taaCfg.toggleKey = readInt("TAA", "toggleKey", 123, path);      // 123 = F12
+	cfg.taaCfg.log       = readInt("TAA", "log", 1, path);
+	if(cfg.taaCfg.blend < 3) cfg.taaCfg.blend = 3; if(cfg.taaCfg.blend > 50) cfg.taaCfg.blend = 50;
+	if(cfg.taaCfg.clipGamma < 50) cfg.taaCfg.clipGamma = 50; if(cfg.taaCfg.clipGamma > 300) cfg.taaCfg.clipGamma = 300;
+	if(cfg.taaCfg.jitter < 25) cfg.taaCfg.jitter = 25; if(cfg.taaCfg.jitter > 200) cfg.taaCfg.jitter = 200;
 	cfg.ssaoCfg.interval    = readInt("AO", "updateInterval", 1, path);
 	if(cfg.ssaoCfg.interval < 0) cfg.ssaoCfg.interval = 0;
 	if(cfg.ssaoCfg.interval > 4) cfg.ssaoCfg.interval = 4;
@@ -447,13 +424,12 @@ myColourFilter(unsigned c1, unsigned c2)
 	if(cfg.ssao)
 		SSAO_Apply(cam->nearPlane, cam->farPlane, cam->viewWindow.x, cam->viewWindow.y, &cfg.ssaoCfg);
 
-	// atmosphere (depth fog + bloom): after the AO, so the AO also fades into the fog; before the AA pass
-	if(cfg.atmosCfg.enable)
-		Atmos_Apply(cam->nearPlane, cam->farPlane, &cfg.atmosCfg);
-
 	// FXAA + sharpening last: it sees the final colour (colour mod + AO) and runs before the HUD
-	if(cfg.postCfg.smaa || cfg.postCfg.fxaa || cfg.postCfg.sharpen)
-		Post_Apply(&cfg.postCfg);
+	// temporal AA first (needs the AO's depth); when it resolved the frame, FXAA/SMAA are skipped, sharpening still runs
+	PostConfig pc = cfg.postCfg;
+	if(cfg.taaCfg.enable && TAA_Apply()){ pc.smaa = 0; pc.fxaa = 0; }
+	if(pc.smaa || pc.fxaa || pc.sharpen)
+		Post_Apply(&pc);
 	if(!cfg.blurEdges) return;
 
 	RwRaster *fb = *(RwRaster**)0xC402D8;
@@ -520,7 +496,7 @@ fixSeed(void)
 static void
 installColourFilterHook(void)
 {
-	if(!(cfg.occCfg.enable || cfg.atmosCfg.enable || cfg.cloudsCfg.enable || cfg.blurEdges || cfg.ssao || cfg.postCfg.smaa || cfg.postCfg.fxaa || cfg.postCfg.sharpen)) return;
+	if(!(cfg.taaCfg.enable || cfg.occCfg.enable || cfg.cloudsCfg.enable || cfg.blurEdges || cfg.ssao || cfg.postCfg.smaa || cfg.postCfg.fxaa || cfg.postCfg.sharpen)) return;
 	uint32_t prev = PTRFROMCALL(0x704D1E);        // current target of the call site (rel32 call/jmp)
 	if(prev == (uint32_t)myColourFilter) return;  // already hooked
 	oColourFilter = (DPColourFilterFn)prev;
@@ -542,6 +518,7 @@ DllMain(HINSTANCE hInst, DWORD reason, LPVOID)
 		InjectHook(0x5BF8EA, CPlantMgr_Initialise_hook);              // grass
 
 		Occlusion_Init(&cfg.occCfg);
+		TAA_Init(&cfg.taaCfg);
 
 		if(cfg.disableClouds)
 			InjectHook(0x714145, 0x71422A, PATCH_JUMP);               // jump over cloud loop
