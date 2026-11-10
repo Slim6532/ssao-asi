@@ -128,12 +128,8 @@ static HRESULT WINAPI hkSetDSS(IDirect3DDevice9 *dev, IDirect3DSurface9 *s)
 	return oSetDSS(dev, s);
 }
 
-void Occlusion_OnReset(void);
-void TAA_OnReset(void);
 static HRESULT WINAPI hkReset(IDirect3DDevice9 *dev, D3DPRESENT_PARAMETERS *pp)
 {
-	Occlusion_OnReset();
-	TAA_OnReset();
 	dropDefaultPool();
 	HRESULT hr = oReset(dev, pp);
 	if(SUCCEEDED(hr)) readBackbufferSize(dev);

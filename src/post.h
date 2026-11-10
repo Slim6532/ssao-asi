@@ -1,14 +1,10 @@
 #pragma once
-// FXAA + CAS-style sharpening, one full-screen pass over the finished frame (before the HUD).
+// SMAA 1x anti-aliasing: three full-screen passes over the finished frame (before the HUD).
 // Call Post_Apply once per frame, after the colour filter and the AO.
 
 struct PostConfig {
-	int   smaa;          // 1 = SMAA (needs SMAA.hlsl + AreaTex.h + SearchTex.h in src\, else falls back to FXAA)
-	int   fxaa;          // 1 = FXAA on (used when SMAA is off or unavailable)
-	float edgeThresh;    // FXAA edge threshold as a ratio of local brightness (0.125 = default, lower = more AA)
-	int   sharpen;       // 1 = sharpening on
-	float sharpAmount;   // 0..1
-	int   toggleKey;     // virtual-key code, toggles the whole post pass on/off (for comparing). 0 = none
+	int smaa;        // 1 = SMAA on (needs SMAA.hlsl + AreaTex.h + SearchTex.h in src\ at build time)
+	int toggleKey;   // virtual-key code, toggles SMAA on/off (for comparing). 0 = none
 };
 
 void Post_Apply(const PostConfig *cfg);

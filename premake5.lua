@@ -15,20 +15,14 @@ project "dualpass"
 	characterset "MBCS"
 	buildoptions { "/Zc:threadSafeInit-" }
 	flags { "StaticRuntime" }
-	-- compile the SSAO shaders into headers (fxc comes with the Windows SDK)
+	-- compile the AO shaders into headers (fxc comes with the Windows SDK)
 	prebuildcommands {
-		'fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsTaa /Fh ..\\src\\taa_vs.h ..\\src\\taa.hlsl',
-		'fxc /nologo /O3 /T ps_3_0 /E PSTaa /Vn g_psTaa /Fh ..\\src\\taa_ps.h ..\\src\\taa.hlsl',
-		'fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsOccl /Fh ..\\src\\occl_vs.h ..\\src\\occl.hlsl',
-		'fxc /nologo /O3 /T ps_3_0 /E PSMain /Vn g_psOccl /Fh ..\\src\\occl_ps.h ..\\src\\occl.hlsl',
 		'fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsQuad /Fh ..\\src\\ssao_vs.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSAO /Vn g_psAO0 /D NDIR=4 /D NSTEP=4 /Fh ..\\src\\ssao_ps_ao0.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSAO /Vn g_psAO1 /D NDIR=8 /D NSTEP=4 /Fh ..\\src\\ssao_ps_ao1.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSAO /Vn g_psAO2 /D NDIR=8 /D NSTEP=4 /Fh ..\\src\\ssao_ps_ao2.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSBlur /Vn g_psBlur /Fh ..\\src\\ssao_ps_blur.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSComp /Vn g_psComp /Fh ..\\src\\ssao_ps_comp.h ..\\src\\ssao.hlsl',
-		'fxc /nologo /O3 /T vs_3_0 /E VSMain /Vn g_vsPost /Fh ..\\src\\post_vs.h ..\\src\\post.hlsl',
-		'fxc /nologo /O3 /T ps_3_0 /E PSPost /Vn g_psPost /Fh ..\\src\\post_ps.h ..\\src\\post.hlsl',
 	}
 
 	filter "configurations:Release"
