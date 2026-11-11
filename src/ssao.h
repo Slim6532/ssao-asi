@@ -3,7 +3,7 @@
 // Call SSAO_Apply once per frame, after the 3D scene is drawn and before the HUD.
 
 struct SSAOConfig {
-	int   quality;       // 0 = fast (4 directions, half res), 1 = HBAO+ (8 directions, half res), 2 = HBAO+ at FULL resolution
+	int   quality;       // 0 = fast (4 directions, half res), 1 = HBAO+ (8 directions, half res), 2 = HBAO+ at FULL resolution, 3 = SAO (Scalable Ambient Obscurance, half res, ~3-4x cheaper than 1)
 	float radius;        // AO radius in game units (1 unit ~ 1 metre)
 	float intensity;     // multiplier on both scales, 1 = NVIDIA default
 	float power;         // NVIDIA PowerExponent: final AO = pow(AO, power), 1..4, default 2

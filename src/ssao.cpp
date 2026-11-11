@@ -30,6 +30,7 @@
 #include "ssao_ps_ao0.h"    // g_psAO0   (low)
 #include "ssao_ps_ao1.h"    // g_psAO1   (medium)
 #include "ssao_ps_ao2.h"    // g_psAO2   (high)
+#include "ssao_ps_sao.h"    // g_psSao   (Scalable Ambient Obscurance, lightest)
 #include "ssao_ps_blur.h"   // g_psBlur
 #include "ssao_ps_comp.h"   // g_psComp
 
@@ -67,7 +68,7 @@ static IDirect3DTexture9      *gDepthTex, *gTexA, *gTexB;
 static IDirect3DSurface9      *gDepthSurf, *gSurfA, *gSurfB;
 static IDirect3DStateBlock9   *gSB;
 static IDirect3DVertexShader9 *gVS;
-static IDirect3DPixelShader9  *gPSAO[3], *gPSBlur, *gPSComp;
+static IDirect3DPixelShader9  *gPSAO[4], *gPSBlur, *gPSComp;
 static IDirect3DVertexDeclaration9 *gDecl;
 static bool gAOValid;                       // gTexA holds a finished AO result we can reuse
 static int  gSkipCount;                     // frames since the AO was last recomputed
@@ -83,7 +84,7 @@ static void dropAll(void)
 	gAOFmt = D3DFMT_UNKNOWN;                // re-probe on a new device
 	dropDefaultPool();
 	REL(gVS); REL(gPSBlur); REL(gPSComp); REL(gDecl); REL(gRandTex);
-	for(int i = 0; i < 3; i++) REL(gPSAO[i]);
+	for(int i = 0; i < 4; i++) REL(gPSAO[i]);
 }
 
 static void readBackbufferSize(IDirect3DDevice9 *dev)
@@ -220,6 +221,7 @@ static bool ensureResources(IDirect3DDevice9 *dev)
 		dev->CreatePixelShader((const DWORD*)g_psAO0, &gPSAO[0]);
 		dev->CreatePixelShader((const DWORD*)g_psAO1, &gPSAO[1]);
 		dev->CreatePixelShader((const DWORD*)g_psAO2, &gPSAO[2]);
+		dev->CreatePixelShader((const DWORD*)g_psSao, &gPSAO[3]);
 		dev->CreatePixelShader((const DWORD*)g_psBlur, &gPSBlur);
 		dev->CreatePixelShader((const DWORD*)g_psComp, &gPSComp);
 		D3DVERTEXELEMENT9 el[] = {
@@ -227,7 +229,7 @@ static bool ensureResources(IDirect3DDevice9 *dev)
 			D3DDECL_END()
 		};
 		dev->CreateVertexDeclaration(el, &gDecl);
-		if(!gVS || !gPSAO[0] || !gPSAO[1] || !gPSAO[2] || !gPSBlur || !gPSComp || !gDecl){
+		if(!gVS || !gPSAO[0] || !gPSAO[1] || !gPSAO[2] || !gPSAO[3] || !gPSBlur || !gPSComp || !gDecl){
 			LOG("shader/decl creation failed");
 			gFailed = true; return false;
 		}
@@ -353,7 +355,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	}
 	if(q < 0 || gMode == 2) return;         // governor or toggle key switched AO off
 	if(!gW || !gH) return;                  // minimized / mode change in progress
-	setAOScale(q >= 2 ? 1 : 2);             // quality 2 = full-res AO
+	setAOScale(q == 2 ? 1 : 2);            // quality 2 = full-res AO; 0, 1 and 3 (SAO) run at half resolution
 	if(!ensureResources(dev)){
 		if(frame % 600 == 0) LOG("ensureResources failed (AO targets or state block)");
 		return;
@@ -426,7 +428,7 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 			warmed = true;
 			dev->SetTexture(1, NULL);
 			setTarget(dev, gSurfA, gHW, gHH);
-			for(int v = 0; v < 3; v++){ if(v == q) continue; dev->SetPixelShader(gPSAO[v]); drawQuad(dev); }
+			for(int v = 0; v < 4; v++){ if(v == q) continue; dev->SetPixelShader(gPSAO[v]); drawQuad(dev); }
 		}
 
 	// ---- 1. AO (AO resolution) -> A ----

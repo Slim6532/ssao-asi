@@ -266,3 +266,80 @@ float4 PSComp(float2 uv : TEXCOORD0) : COLOR
 	v = saturate(v + (n - 0.5) * (1.0 / 255.0));
 	return float4(v, v, v, 1);
 }
+
+// ------------------------------------------------------------------------------------
+// Scalable Ambient Obscurance (McGuire, Mara, Luebke - HPG 2012, NVIDIA research): one cheap spiral of
+// SAO_TAPS samples per pixel instead of HBAO+'s 8 directions x 4 steps, so it is roughly 3-4x cheaper.
+// Same output layout as PSAO (ao, linear depth, normal xy), so the blur and the upsample are shared.
+//   per tap  : f = max(R^2 - |V|^2, 0);  term = f^3 * max(N.V - bias*|V|, 0) / (|V|^2 + eps)
+//   AO       = max(0, 1 - sum * intensity / R^5 * 5 / N)      (R^5 instead of the paper's R^6 keeps the intensity unit-free)
+#ifndef SAO_TAPS
+#define SAO_TAPS 9
+#endif
+#ifndef SAO_TURNS
+#define SAO_TURNS 7.0
+#endif
+
+float4 PSSao(float2 uv : TEXCOORD0) : COLOR
+{
+	float scale = gCfg2.w;
+	uv = SnapUV(uv - (scale - 1.0) * 0.5 * gView.zw);
+	float d0 = tex2Dlod(sDepth, float4(uv, 0, 0)).r;
+	[branch] if (scale > 1.5)
+	{
+		float2 tx1 = float2(gView.z, 0);
+		float2 ty1 = float2(0, gView.w);
+		float dB = tex2Dlod(sDepth, float4(uv + tx1, 0, 0)).r;
+		float dC = tex2Dlod(sDepth, float4(uv + ty1, 0, 0)).r;
+		float dD = tex2Dlod(sDepth, float4(uv + tx1 + ty1, 0, 0)).r;
+		float dm = min(min(d0, dB), min(dC, dD));
+		float2 pick = uv;
+		if(dm == dB)      pick = uv + tx1;
+		else if(dm == dC) pick = uv + ty1;
+		else if(dm == dD) pick = uv + tx1 + ty1;
+		d0 = dm;
+		uv = pick;
+	}
+	float zc  = gProj.x / (gProj.y - d0 * gProj.z);
+	float zs0 = min(zc, 60000.0);
+	float rPx = gProj.w / (2.0 * gView.x * zc) / gView.z;
+	[branch] if (d0 >= 0.9999 || zc > gCfg.w || rPx < 3.0)
+		return float4(1, zs0, 0, 0);
+	rPx = min(rPx, gCfg.z);
+
+	float3 P = ViewPos(uv, zc);
+	float2 tx = float2(gView.z, 0);
+	float2 ty = float2(0, gView.w);
+	float3 Pr = ViewPos(uv + tx, LinZ(uv + tx));
+	float3 Pl = ViewPos(uv - tx, LinZ(uv - tx));
+	float3 Pd = ViewPos(uv + ty, LinZ(uv + ty));
+	float3 Pu = ViewPos(uv - ty, LinZ(uv - ty));
+	float3 N  = normalize(cross(MinDiff(P, Pr, Pl), MinDiff(P, Pd, Pu)) + 1e-8);
+	N = (dot(N, P) > 0) ? -N : N;
+
+	float2 apix = floor(uv / gCfg2.yz);
+	float2 rnd  = tex2Dlod(sRand, float4((fmod(apix, 4.0) + 0.5) * 0.25, 0, 0)).rg;
+	float phi   = rnd.x * 6.2831853;
+
+	float R  = gProj.w;
+	float R2 = R * R;
+	float eps = 0.02 * R2;
+	float sum = 0;
+	[unroll] for (int i = 0; i < SAO_TAPS; i++)
+	{
+		float a   = (i + 0.5 + (rnd.y - 0.5) * 0.5) / SAO_TAPS;   // 0..1 along the spiral, jittered a little
+		float ang = a * (SAO_TURNS * 6.2831853) + phi;
+		float2 suv = SnapUV(uv + (a * rPx) * float2(cos(ang), sin(ang)) * gView.zw);
+		float3 V  = ViewPos(suv, LinZ(suv)) - P;
+		float vv  = dot(V, V);
+		float f   = max(R2 - vv, 0.0);
+		sum += f * f * f * max(dot(N, V) - gCfg3.w * sqrt(vv), 0.0) / (vv + eps);
+	}
+	float inten = 0.5 * (gCfg3.x + gCfg3.y);                      // smallScale/largeScale amounts averaged: one intensity
+	float ao = sum * inten * 0.25 / (R2 * R2 * R) * (5.0 / SAO_TAPS);
+
+	float fade = saturate((gCfg.w - zc) / (gCfg.w * 0.35));
+	fade = fade * fade * (3.0 - 2.0 * fade);
+	float v = 1.0 - saturate(ao) * fade;
+	return float4(v, zs0, N.xy);
+}

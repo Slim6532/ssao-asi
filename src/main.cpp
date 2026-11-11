@@ -102,7 +102,7 @@ readConfig(HINSTANCE hInst)
 	cfg.ssao          = readInt("AO", "ssao", 0, path);
 	cfg.ssaoCfg.quality     = readInt("AO", "quality", 1, path);
 	if(cfg.ssaoCfg.quality < 0) cfg.ssaoCfg.quality = 0;
-	if(cfg.ssaoCfg.quality > 2) cfg.ssaoCfg.quality = 2;
+	if(cfg.ssaoCfg.quality > 3) cfg.ssaoCfg.quality = 3;
 	cfg.ssaoCfg.radius      = readInt("AO", "radius", 15, path) / 10.0f;
 	cfg.ssaoCfg.intensity   = readInt("AO", "intensity", 100, path) / 100.0f;
 	cfg.ssaoCfg.power       = readInt("AO", "power", 200, path) / 100.0f;

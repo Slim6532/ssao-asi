@@ -13,3 +13,6 @@ Add three files from https://github.com/iryoku/smaa to `src/` before building: `
 Upload this folder to a repo (keep `.github/workflows/main.yml`), run the "main" workflow, download the `dualpass` artifact (dualpass.asi + dualpass.ini).
 
 Don't run this together with skygfx.dll - they patch the same spots.
+
+## AO quality 3: Scalable Ambient Obscurance
+`quality = 3` in `[AO]` switches the AO pass to SAO (McGuire, Mara, Luebke, NVIDIA research, HPG 2012): 9 spiral taps per pixel at half resolution instead of HBAO+'s 8 directions x 4 steps, so it is roughly 3-4x cheaper. It shares the blur and the depth/normal-aware upsample with HBAO+. `radius`, `intensity`, `power`, `bias`, `fadeDistance` and `maxRadiusPx` apply; if it looks too dark or too light, change `intensity` first. Set `quality = 1` for HBAO+ again.

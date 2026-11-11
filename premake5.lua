@@ -21,6 +21,7 @@ project "dualpass"
 		'fxc /nologo /O3 /T ps_3_0 /E PSAO /Vn g_psAO0 /D NDIR=4 /D NSTEP=4 /Fh ..\\src\\ssao_ps_ao0.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSAO /Vn g_psAO1 /D NDIR=8 /D NSTEP=4 /Fh ..\\src\\ssao_ps_ao1.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSAO /Vn g_psAO2 /D NDIR=8 /D NSTEP=4 /Fh ..\\src\\ssao_ps_ao2.h ..\\src\\ssao.hlsl',
+		'fxc /nologo /O3 /T ps_3_0 /E PSSao /Vn g_psSao /Fh ..\\src\\ssao_ps_sao.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSBlur /Vn g_psBlur /Fh ..\\src\\ssao_ps_blur.h ..\\src\\ssao.hlsl',
 		'fxc /nologo /O3 /T ps_3_0 /E PSComp /Vn g_psComp /Fh ..\\src\\ssao_ps_comp.h ..\\src\\ssao.hlsl',
 	}
