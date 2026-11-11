@@ -282,7 +282,7 @@ static void updateMode(const SSAOConfig *c)
 static LARGE_INTEGER gFreq, gLast;
 static float gEma;                          // smoothed frame time, ms
 static int   gLevel;                        // 0 = configured quality, then lowest quality, then off
-static int   gCooldown, gSinceChange, gUpCooldown = 600;
+static int   gCooldown, gSinceChange, gUpCooldown = 1800;
 static bool  gLastWasUp;
 
 // returns the quality to render with (0..2) or -1 = AO off
@@ -293,6 +293,8 @@ static int updateGovernor(const SSAOConfig *c)
 	if(gFreq.QuadPart == 0) QueryPerformanceFrequency(&gFreq);
 	if(gLast.QuadPart){
 		float dt = (float)((now.QuadPart - gLast.QuadPart) * 1000.0 / (double)gFreq.QuadPart);
+		static int spikes;
+		if(gEma > 0.0f && dt > 40.0f && dt > gEma * 3.0f && spikes < 60){ spikes++; LOG("frame spike %.1f ms (avg %.1f ms, level %d)", dt, gEma, gLevel); }
 		if(dt < 250.0f) gEma = gEma == 0.0f ? dt : gEma * 0.95f + dt * 0.05f;   // ignore pauses/loading
 	}
 	gLast = now;
@@ -303,14 +305,14 @@ static int updateGovernor(const SSAOConfig *c)
 		if(gCooldown > 0) gCooldown--;
 		else{
 			float limit = 1000.0f / c->minFps;
-			if(gEma > limit * 1.03f && gLevel < maxLv){
+			if(gEma > limit * 1.15f && gLevel < maxLv){
 				// got worse soon after coming back up -> wait longer before trying again
 				if(gLastWasUp && gSinceChange < gUpCooldown)
-					gUpCooldown = gUpCooldown * 2 > 7200 ? 7200 : gUpCooldown * 2;
-				gLevel++; gLastWasUp = false; gSinceChange = 0; gCooldown = 120;
+					gUpCooldown = gUpCooldown * 2 > 14400 ? 14400 : gUpCooldown * 2;
+				gLevel++; gLastWasUp = false; gSinceChange = 0; gCooldown = 300;
 				LOG("governor: FPS %.1f below floor -> level %d", 1000.0f / gEma, gLevel);
-			}else if(gLevel > 0 && gSinceChange > gUpCooldown && gEma < 1000.0f / (c->minFps + 10.0f)){
-				gLevel--; gLastWasUp = true; gSinceChange = 0; gCooldown = 120;
+			}else if(gLevel > 0 && gSinceChange > gUpCooldown && gEma < 1000.0f / (c->minFps + 30.0f)){
+				gLevel--; gLastWasUp = true; gSinceChange = 0; gCooldown = 300;
 				LOG("governor: headroom (%.1f FPS) -> level %d", 1000.0f / gEma, gLevel);
 			}
 		}
@@ -418,6 +420,14 @@ void SSAO_Apply(float nearZ, float farZ, float vwX, float vwY, const SSAOConfig 
 	bool compute = !gAOValid || ++gSkipCount >= interval;
 	if(compute){
 		gSkipCount = 0;
+		// one-time: touch every AO shader variant now so the driver compiles them at load, not as a hitch later
+		static bool warmed;
+		if(!warmed){
+			warmed = true;
+			dev->SetTexture(1, NULL);
+			setTarget(dev, gSurfA, gHW, gHH);
+			for(int v = 0; v < 3; v++){ if(v == q) continue; dev->SetPixelShader(gPSAO[v]); drawQuad(dev); }
+		}
 
 	// ---- 1. AO (AO resolution) -> A ----
 	dev->SetTexture(1, NULL);
